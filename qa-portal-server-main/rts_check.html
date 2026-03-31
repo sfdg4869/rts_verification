@@ -998,7 +998,10 @@ function renderCpuMemResult(data) {
   `).join('');
 
   const note = data.note ? `<div class="status-msg" style="margin-top:6px">${escHtml(data.note)}</div>` : '';
-  wrap.innerHTML = head + rows + note;
+  const logFile = data.log_file
+    ? `<div class="status-msg" style="margin-top:4px">log file: <b>${escHtml(data.log_file)}</b></div>`
+    : '';
+  wrap.innerHTML = head + rows + note + logFile;
 }
 
 $('btnCpuMemSnapshot').onclick = async () => {

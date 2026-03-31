@@ -1,0 +1,3 @@
+{"ts": 1774942969, "host_ip": "10.10.47.35", "conf_name": "H11204_25FN_O2", "daemon": "rts", "pid": "22651", "cpu_pct": 5.38, "mem_pct": null, "rss_kb": 6467}
+{"ts": 1774942969, "host_ip": "10.10.47.35", "conf_name": "H11204_25FN_O2", "daemon": "sndf", "pid": "22657", "cpu_pct": 0.12, "mem_pct": null, "rss_kb": 111}
+{"ts": 1774942969, "host_ip": "10.10.47.35", "conf_name": "H11204_25FN_O2", "daemon": "obsd", "pid": "22663", "cpu_pct": 0.03, "mem_pct": null, "rss_kb": 1350}
