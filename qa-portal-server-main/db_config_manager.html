@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DB 설정 관리자</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f5f5f5;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px 30px;
+            text-align: center;
+        }
+        
+        .status-bar {
+            background: #f8f9fa;
+            padding: 15px 30px;
+            border-bottom: 1px solid #dee2e6;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .status-badge {
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        
+        .status-connected { background: #d4edda; color: #155724; }
+        .status-disconnected { background: #f8d7da; color: #721c24; }
+        
+        .main-content {
+            display: flex;
+            height: 600px;
+        }
+        
+        .db-list-panel {
+            width: 50%;
+            border-right: 1px solid #dee2e6;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .panel-header {
+            background: #6c757d;
+            color: white;
+            padding: 15px 20px;
+            font-weight: bold;
+        }
+        
+        .db-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+        }
+        
+        .db-item {
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            padding: 15px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background: white;
+        }
+        
+        .db-item:hover {
+            border-color: #007bff;
+            box-shadow: 0 2px 8px rgba(0,123,255,0.2);
+        }
+        
+        .db-item.selected {
+            border-color: #28a745;
+            background: #f8fff9;
+            box-shadow: 0 2px 8px rgba(40,167,69,0.3);
+        }
+        
+        .db-item-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        
+        .db-name {
+            font-weight: bold;
+            color: #495057;
+        }
+        
+        .db-type {
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: bold;
+        }
+        
+        .type-target { background: #fff3cd; color: #856404; }
+        .type-repo { background: #d1ecf1; color: #0c5460; }
+        .type-general { background: #e2e3e5; color: #383d41; }
+        
+        .db-details {
+            font-size: 13px;
+            color: #6c757d;
+            line-height: 1.4;
+        }
+        
+        .assignment-panel {
+            width: 50%;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .current-assignment {
+            flex: 1;
+            padding: 20px;
+        }
+        
+        .assignment-section {
+            margin-bottom: 30px;
+        }
+        
+        .assignment-title {
+            font-size: 16px;
+            font-weight: bold;
+            color: #495057;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .target-icon { color: #dc3545; }
+        .repo-icon { color: #17a2b8; }
+        
+        .assigned-db {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            padding: 15px;
+            min-height: 80px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #6c757d;
+            font-style: italic;
+        }
+        
+        .assigned-db.has-content {
+            color: #495057;
+            font-style: normal;
+            text-align: left;
+            justify-content: flex-start;
+        }
+        
+        .action-buttons {
+            background: #f8f9fa;
+            padding: 20px;
+            border-top: 1px solid #dee2e6;
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+        }
+        
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s ease;
+            min-width: 120px;
+        }
+        
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .btn-target {
+            background: #dc3545;
+            color: white;
+        }
+        
+        .btn-target:hover:not(:disabled) {
+            background: #c82333;
+        }
+        
+        .btn-repo {
+            background: #17a2b8;
+            color: white;
+        }
+        
+        .btn-repo:hover:not(:disabled) {
+            background: #138496;
+        }
+        
+        .btn-refresh {
+            background: #6c757d;
+            color: white;
+        }
+        
+        .btn-refresh:hover {
+            background: #5a6268;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #6c757d;
+        }
+        
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 10px;
+            text-align: center;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #6c757d;
+        }
+        
+        .success-message {
+            background: #d4edda;
+            color: #155724;
+            padding: 10px 20px;
+            border-radius: 5px;
+            margin: 10px 0;
+            text-align: center;
+            animation: fadeIn 0.5s ease;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        .db-connection-info {
+            font-size: 12px;
+            margin-top: 5px;
+        }
+        
+        .connection-detail {
+            display: inline-block;
+            margin-right: 15px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔧 DB 설정 관리자</h1>
+            <p>MongoDB에서 DB 설정을 조회하여 Target/Repo DB로 지정</p>
+        </div>
+        
+        <div class="status-bar">
+            <div class="status-item">
+                <span>MongoDB 상태:</span>
+                <span id="mongodb-status" class="status-badge status-disconnected">연결 확인 중...</span>
+            </div>
+            <div class="status-item">
+                <span>현재 프로필:</span>
+                <span id="current-profile">없음</span>
+            </div>
+            <button class="btn btn-refresh" onclick="refreshAll()">🔄 새로고침</button>
+        </div>
+        
+        <div class="main-content">
+            <div class="db-list-panel">
+                <div class="panel-header">
+                    📋 DB 설정 목록
+                </div>
+                <div id="db-list" class="db-list">
+                    <div class="loading">DB 설정 목록을 불러오는 중...</div>
+                </div>
+            </div>
+            
+            <div class="assignment-panel">
+                <div class="current-assignment">
+                    <div class="assignment-section">
+                        <div class="assignment-title">
+                            <span class="target-icon">🎯</span>
+                            Target DB (모니터링 대상)
+                        </div>
+                        <div id="target-assignment" class="assigned-db">
+                            Target DB가 설정되지 않았습니다.
+                        </div>
+                    </div>
+                    
+                    <div class="assignment-section">
+                        <div class="assignment-title">
+                            <span class="repo-icon">📊</span>
+                            Repo DB (데이터 저장소)
+                        </div>
+                        <div id="repo-assignment" class="assigned-db">
+                            Repo DB가 설정되지 않았습니다.
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="action-buttons">
+                    <button id="assign-target" class="btn btn-target" onclick="assignAsTarget()" disabled>
+                        🎯 Target으로 지정
+                    </button>
+                    <button id="assign-repo" class="btn btn-repo" onclick="assignAsRepo()" disabled>
+                        📊 Repo로 지정
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let selectedDbConfig = null;
+        let allDbConfigs = [];
+        
+        // 페이지 로드 시 초기화
+        document.addEventListener('DOMContentLoaded', function() {
+            refreshAll();
+        });
+        
+        // 모든 데이터 새로고침
+        async function refreshAll() {
+            await checkMongoDBStatus();
+            await loadDbConfigs();
+            await loadCurrentAssignments();
+        }
+        
+        // MongoDB 상태 확인
+        async function checkMongoDBStatus() {
+            try {
+                const response = await fetch('/rts/mongodb/status');
+                const result = await response.json();
+                
+                const statusElement = document.getElementById('mongodb-status');
+                if (result.connected) {
+                    statusElement.textContent = '연결됨';
+                    statusElement.className = 'status-badge status-connected';
+                } else {
+                    statusElement.textContent = '연결 실패';
+                    statusElement.className = 'status-badge status-disconnected';
+                }
+            } catch (error) {
+                document.getElementById('mongodb-status').textContent = '오류';
+                document.getElementById('mongodb-status').className = 'status-badge status-disconnected';
+            }
+        }
+        
+        // DB 설정 목록 로드
+        async function loadDbConfigs() {
+            const listElement = document.getElementById('db-list');
+            
+            try {
+                // MongoDB에서 모든 DB 설정 조회
+                const response = await fetch('/rts/mongodb/configs/all');
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    if (result.status === 'success') {
+                        allDbConfigs = result.configs || [];
+                    } else {
+                        allDbConfigs = [];
+                    }
+                } else {
+                    // API 실패 시 현재 설정된 Target/Repo 정보 조회
+                    const [targetResponse, repoResponse] = await Promise.all([
+                        fetch('/rts/mongodb/configs/target'),
+                        fetch('/rts/mongodb/configs/repo')
+                    ]);
+                    
+                    allDbConfigs = [];
+                    
+                    // Target 설정 추가
+                    if (targetResponse.ok) {
+                        const targetResult = await targetResponse.json();
+                        if (targetResult.status === 'success' && targetResult.config) {
+                            allDbConfigs.push({
+                                ...targetResult.config,
+                                config_id: 'target_current',
+                                config_type: 'target',
+                                display_name: 'Current Target DB'
+                            });
+                        }
+                    }
+                    
+                    // Repo 설정 추가
+                    if (repoResponse.ok) {
+                        const repoResult = await repoResponse.json();
+                        if (repoResult.status === 'success' && repoResult.config) {
+                            allDbConfigs.push({
+                                ...repoResult.config,
+                                config_id: 'repo_current',
+                                config_type: 'repo',
+                                display_name: 'Current Repo DB'
+                            });
+                        }
+                    }
+                }
+                
+                // 데이터가 없으면 샘플 데이터 추가
+                if (allDbConfigs.length === 0) {
+                    allDbConfigs = [
+                        {
+                            config_id: 'oracle_prod',
+                            display_name: 'Oracle 운영 서버',
+                            host: '10.20.132.101',
+                            port: 1521,
+                            service_name: 'oracle19',
+                            username: 'maxgauge',
+                            config_type: 'general',
+                            description: '운영 환경 Oracle 서버'
+                        },
+                        {
+                            config_id: 'oracle_test',
+                            display_name: 'Oracle 테스트 서버',
+                            host: '10.20.132.40',
+                            port: 1521,
+                            service_name: 'orcl',
+                            username: 'C##TEST_2507',
+                            config_type: 'general',
+                            description: '테스트 환경 Oracle 서버'
+                        },
+                        {
+                            config_id: 'oracle_dev',
+                            display_name: 'Oracle 개발 서버',
+                            host: 'localhost',
+                            port: 1521,
+                            service_name: 'XE',
+                            username: 'hr',
+                            config_type: 'general',
+                            description: '개발 환경 Oracle Express'
+                        }
+                    ];
+                }
+                
+                renderDbList();
+                
+            } catch (error) {
+                listElement.innerHTML = '<div class="error">DB 설정 목록 로드 실패: ' + error.message + '</div>';
+            }
+        }
+        
+        // DB 목록 렌더링
+        function renderDbList() {
+            const listElement = document.getElementById('db-list');
+            
+            if (allDbConfigs.length === 0) {
+                listElement.innerHTML = '<div class="empty-state">등록된 DB 설정이 없습니다.</div>';
+                return;
+            }
+            
+            listElement.innerHTML = allDbConfigs.map(config => `
+                <div class="db-item" onclick="selectDbConfig('${config.config_id}')">
+                    <div class="db-item-header">
+                        <div class="db-name">${config.display_name || config.config_id}</div>
+                        <div class="db-type type-${config.config_type}">${getTypeLabel(config.config_type)}</div>
+                    </div>
+                    <div class="db-details">
+                        <div class="db-connection-info">
+                            <span class="connection-detail"><strong>호스트:</strong> ${config.host}:${config.port}</span>
+                            <span class="connection-detail"><strong>서비스:</strong> ${config.service_name}</span>
+                            <span class="connection-detail"><strong>사용자:</strong> ${config.username}</span>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+        
+        // 설정 타입 라벨
+        function getTypeLabel(type) {
+            switch(type) {
+                case 'target': return 'TARGET';
+                case 'repo': return 'REPO';
+                default: return 'GENERAL';
+            }
+        }
+        
+        // DB 설정 선택
+        function selectDbConfig(configId) {
+            // 이전 선택 해제
+            document.querySelectorAll('.db-item').forEach(item => {
+                item.classList.remove('selected');
+            });
+            
+            // 새 선택 적용
+            event.currentTarget.classList.add('selected');
+            
+            selectedDbConfig = allDbConfigs.find(config => config.config_id === configId);
+            
+            // 버튼 활성화
+            document.getElementById('assign-target').disabled = false;
+            document.getElementById('assign-repo').disabled = false;
+        }
+        
+        // Target으로 지정
+        async function assignAsTarget() {
+            if (!selectedDbConfig) return;
+            
+            try {
+                const response = await fetch('/rts/mongodb/configs/target', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        host: selectedDbConfig.host,
+                        port: selectedDbConfig.port,
+                        service_name: selectedDbConfig.service_name,
+                        username: selectedDbConfig.username,
+                        password: 'password_placeholder' // 실제로는 사용자 입력 받아야 함
+                    })
+                });
+                
+                const result = await response.json();
+                if (result.status === 'success') {
+                    showSuccessMessage('Target DB로 설정되었습니다!');
+                    await loadCurrentAssignments();
+                } else {
+                    alert('설정 실패: ' + result.message);
+                }
+            } catch (error) {
+                alert('설정 중 오류: ' + error.message);
+            }
+        }
+        
+        // Repo로 지정
+        async function assignAsRepo() {
+            if (!selectedDbConfig) return;
+            
+            try {
+                const response = await fetch('/rts/mongodb/configs/repo', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        host: selectedDbConfig.host,
+                        port: selectedDbConfig.port,
+                        service_name: selectedDbConfig.service_name,
+                        username: selectedDbConfig.username,
+                        password: 'password_placeholder' // 실제로는 사용자 입력 받아야 함
+                    })
+                });
+                
+                const result = await response.json();
+                if (result.status === 'success') {
+                    showSuccessMessage('Repo DB로 설정되었습니다!');
+                    await loadCurrentAssignments();
+                } else {
+                    alert('설정 실패: ' + result.message);
+                }
+            } catch (error) {
+                alert('설정 중 오류: ' + error.message);
+            }
+        }
+        
+        // 현재 할당 상태 로드
+        async function loadCurrentAssignments() {
+            try {
+                // 현재 프로필 정보
+                const profileResponse = await fetch('/rts/mongodb/current-profile');
+                if (profileResponse.ok) {
+                    const profileResult = await profileResponse.json();
+                    document.getElementById('current-profile').textContent = 
+                        profileResult.current_profile || '없음';
+                }
+                
+                // Target DB 정보
+                const targetResponse = await fetch('/rts/mongodb/configs/target');
+                const targetElement = document.getElementById('target-assignment');
+                
+                if (targetResponse.ok) {
+                    const targetResult = await targetResponse.json();
+                    if (targetResult.status === 'success' && targetResult.config) {
+                        const config = targetResult.config;
+                        targetElement.innerHTML = `
+                            <div><strong>${config.host}:${config.port}</strong></div>
+                            <div>서비스: ${config.service_name}</div>
+                            <div>사용자: ${config.username}</div>
+                        `;
+                        targetElement.className = 'assigned-db has-content';
+                    } else {
+                        targetElement.textContent = 'Target DB가 설정되지 않았습니다.';
+                        targetElement.className = 'assigned-db';
+                    }
+                } else {
+                    targetElement.textContent = 'Target DB 정보를 불러올 수 없습니다.';
+                    targetElement.className = 'assigned-db';
+                }
+                
+                // Repo DB 정보
+                const repoResponse = await fetch('/rts/mongodb/configs/repo');
+                const repoElement = document.getElementById('repo-assignment');
+                
+                if (repoResponse.ok) {
+                    const repoResult = await repoResponse.json();
+                    if (repoResult.status === 'success' && repoResult.config) {
+                        const config = repoResult.config;
+                        repoElement.innerHTML = `
+                            <div><strong>${config.host}:${config.port}</strong></div>
+                            <div>서비스: ${config.service_name}</div>
+                            <div>사용자: ${config.username}</div>
+                        `;
+                        repoElement.className = 'assigned-db has-content';
+                    } else {
+                        repoElement.textContent = 'Repo DB가 설정되지 않았습니다.';
+                        repoElement.className = 'assigned-db';
+                    }
+                } else {
+                    repoElement.textContent = 'Repo DB 정보를 불러올 수 없습니다.';
+                    repoElement.className = 'assigned-db';
+                }
+                
+            } catch (error) {
+                console.error('현재 할당 상태 로드 실패:', error);
+            }
+        }
+        
+        // 성공 메시지 표시
+        function showSuccessMessage(message) {
+            const statusBar = document.querySelector('.status-bar');
+            const successDiv = document.createElement('div');
+            successDiv.className = 'success-message';
+            successDiv.textContent = message;
+            
+            statusBar.appendChild(successDiv);
+            
+            setTimeout(() => {
+                statusBar.removeChild(successDiv);
+            }, 3000);
+        }
+    </script>
+</body>
+</html>

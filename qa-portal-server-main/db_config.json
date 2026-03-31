@@ -1,0 +1,21 @@
+{
+  "target": {
+    "host": "10.20.132.101",
+    "port": 1521,
+    "service": "oracle19",
+    "user": "maxgauge",
+    "password": "maxgauge",
+    "db_type": "oracle",
+    "database": "oracle19"
+  },
+  "repo": {
+    "host": "10.10.47.72",
+    "port": 1521,
+    "user": "REPO_25FINAL2",
+    "password": "REPO_25FINAL2",
+    "database": "T_REPO_25FINAL2",
+    "service": "ORA11204",
+    "service_type": "sid",
+    "db_type": "oracle"
+  }
+}

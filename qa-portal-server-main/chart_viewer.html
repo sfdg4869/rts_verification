@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DB 성능 지표 차트 뷰어</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input, select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        .loading {
+            text-align: center;
+            margin: 20px 0;
+            color: #666;
+        }
+        .error {
+            color: red;
+            background-color: #f8d7da;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .chart-container {
+            margin-top: 20px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 10px;
+        }
+        .summary {
+            background-color: #e9ecef;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+        .form-row {
+            display: flex;
+            gap: 15px;
+        }
+        .form-row .form-group {
+            flex: 1;
+        }
+        .metrics-group {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .metric-checkbox {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .metric-checkbox input {
+            width: auto;
+        }
+        .mode-buttons {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        .mode-btn {
+            padding: 10px 20px;
+            border: 2px solid #007bff;
+            background-color: white;
+            color: #007bff;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s ease;
+            flex: 1;
+            text-align: center;
+        }
+        .mode-btn:hover {
+            background-color: #e7f3ff;
+        }
+        .mode-btn.active {
+            background-color: #007bff;
+            color: white;
+        }
+        .radio-hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔷 DB 성능 지표 차트 뷰어 (실시간 / 과거 조회)</h1>
+        <p>Target DB와 Repo DB의 <strong>10개 성능 지표</strong>를 <strong>실시간</strong> 또는 <strong>특정 시간대</strong>에서 30초간 수집하고 각 지표별로 개별 꺾은선 그래프로 비교할 수 있습니다.</p>
+        <div style="background-color: #e7f3ff; padding: 10px; border-radius: 4px; margin-bottom: 20px;">
+            <strong>📌 모드 선택:</strong>
+            <ul style="margin: 5px 0; padding-left: 20px;">
+                <li><strong>실시간 모드:</strong> 현재 시점에서 30초간 매초 데이터 수집 (SYSDATE 기준)</li>
+                <li><strong>과거 조회 모드:</strong> 파티션 키 범위의 과거 데이터 조회 (빠른 응답)</li>
+                <li><strong>차트 구성:</strong> 각 지표마다 Target(실선) vs Repo(점선) 비교</li>
+            </ul>
+        </div>
+        
+        <form id="chartForm">
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="target_db_id">🎯 Target DB ID:</label>
+                    <input type="number" id="target_db_id" name="target_db_id" value="1" required>
+                </div>
+                <div class="form-group">
+                    <label for="repo_db_id">🗄️ Repo DB ID:</label>
+                    <input type="number" id="repo_db_id" name="repo_db_id" value="1" required>
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <label>조회 모드:</label>
+                <div class="mode-buttons">
+                    <input type="radio" id="mode_realtime" name="mode" value="realtime" class="radio-hidden" checked onchange="toggleMode()">
+                    <label for="mode_realtime" class="mode-btn active">
+                        📊 실시간 모드<br>
+                        <small>(30초간 실시간 수집)</small>
+                    </label>
+                    
+                    <input type="radio" id="mode_historical" name="mode" value="historical" class="radio-hidden" onchange="toggleMode()">
+                    <label for="mode_historical" class="mode-btn">
+                        📈 과거 조회 모드<br>
+                        <small>(파티션 키 범위)</small>
+                    </label>
+                </div>
+            </div>
+            
+            <div id="partitionKeyFields" class="form-row" style="display: none;">
+                <div class="form-group">
+                    <label for="start_partition_key">시작 파티션 키:</label>
+                    <input type="number" id="start_partition_key" name="start_partition_key" value="100">
+                </div>
+                <div class="form-group">
+                    <label for="end_partition_key">끝 파티션 키:</label>
+                    <input type="number" id="end_partition_key" name="end_partition_key" value="200">
+                </div>
+                <div class="form-group">
+                    <label for="target_datetime">📅 기준 시간 (참고용):</label>
+                    <input type="datetime-local" id="target_datetime" name="target_datetime">
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <label for="chart_type">차트 타입:</label>
+                <select id="chart_type" name="chart_type">
+                    <option value="plotly">Plotly (인터랙티브)</option>
+                    <option value="matplotlib">Matplotlib (정적)</option>
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label>표시할 성능 지표 (복수 선택 가능):</label>
+                <div class="metrics-group">
+                    <div class="metric-checkbox">
+                        <input type="checkbox" id="metric1" value="session logical reads" checked>
+                        <label for="metric1">Session Logical Reads</label>
+                    </div>
+                    <div class="metric-checkbox">
+                        <input type="checkbox" id="metric2" value="DB time" checked>
+                        <label for="metric2">DB Time</label>
+                    </div>
+                    <div class="metric-checkbox">
+                        <input type="checkbox" id="metric3" value="total sessions" checked>
+                        <label for="metric3">Total Sessions</label>
+                    </div>
+                    <div class="metric-checkbox">
+                        <input type="checkbox" id="metric4" value="CPU used by this session" checked>
+                        <label for="metric4">CPU Used by Session</label>
+                    </div>
+                    <div class="metric-checkbox">
+                        <input type="checkbox" id="metric5" value="physical read bytes" checked>
+                        <label for="metric5">Physical Read Bytes</label>
+                    </div>
+                    <div class="metric-checkbox">
+                        <input type="checkbox" id="metric6" value="physical read total bytes" checked>
+                        <label for="metric6">Physical Read Total Bytes</label>
+                    </div>
+                    <div class="metric-checkbox">
+                        <input type="checkbox" id="metric7" value="redo synch long waits" checked>
+                        <label for="metric7">Redo Synch Long Waits</label>
+                    </div>
+                    <div class="metric-checkbox">
+                        <input type="checkbox" id="metric8" value="active user session" checked>
+                        <label for="metric8">Active User Session</label>
+                    </div>
+                    <div class="metric-checkbox">
+                        <input type="checkbox" id="metric9" value="enq: TX - row lock contention" checked>
+                        <label for="metric9">TX Row Lock Contention</label>
+                    </div>
+                    <div class="metric-checkbox">
+                        <input type="checkbox" id="metric10" value="enq: TM - contention" checked>
+                        <label for="metric10">TM Contention</label>
+                    </div>
+                </div>
+            </div>
+            
+            <button type="submit" id="generateBtn">📊 차트 생성</button>
+        </form>
+        
+        <div id="loading" class="loading" style="display: none;">
+            ⏳ 데이터 조회 및 차트 생성 중입니다... 잠시만 기다려주세요.
+        </div>
+        
+        <div id="error" class="error" style="display: none;"></div>
+        
+        <div id="summary" class="summary" style="display: none;"></div>
+        
+        <div id="chartContainer" class="chart-container" style="display: none;"></div>
+    </div>
+
+    <script>
+        function toggleMode() {
+            const realtimeRadio = document.getElementById('mode_realtime');
+            const historicalRadio = document.getElementById('mode_historical');
+            const realtimeBtn = document.querySelector('label[for="mode_realtime"]');
+            const historicalBtn = document.querySelector('label[for="mode_historical"]');
+            
+            const partitionKeyFields = document.getElementById('partitionKeyFields');
+            const generateBtn = document.getElementById('generateBtn');
+            
+            // 버튼 스타일 업데이트
+            if (realtimeRadio.checked) {
+                realtimeBtn.classList.add('active');
+                historicalBtn.classList.remove('active');
+                
+                partitionKeyFields.style.display = 'none';
+                document.getElementById('start_partition_key').required = false;
+                document.getElementById('end_partition_key').required = false;
+                generateBtn.innerHTML = '📊 실시간 차트 생성 (30초 소요)';
+            } else if (historicalRadio.checked) {
+                historicalBtn.classList.add('active');
+                realtimeBtn.classList.remove('active');
+                
+                partitionKeyFields.style.display = 'flex';
+                document.getElementById('start_partition_key').required = true;
+                document.getElementById('end_partition_key').required = true;
+                generateBtn.innerHTML = '📊 과거 데이터 차트 생성';
+            }
+        }
+        
+        document.getElementById('chartForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const formData = new FormData(e.target);
+            const params = new URLSearchParams();
+            const mode = formData.get('mode');
+            
+            // 공통 파라미터
+            params.append('target_db_id', formData.get('target_db_id'));
+            params.append('repo_db_id', formData.get('repo_db_id'));
+            params.append('mode', mode);
+            params.append('chart_type', formData.get('chart_type'));
+            
+            // 과거 조회 모드일 때만 파티션 키 추가
+            if (mode === 'historical') {
+                const startKey = formData.get('start_partition_key');
+                const endKey = formData.get('end_partition_key');
+                
+                if (!startKey || !endKey) {
+                    showError('과거 조회 모드에서는 시작/끝 파티션 키가 필요합니다.');
+                    return;
+                }
+                
+                params.append('start_partition_key', startKey);
+                params.append('end_partition_key', endKey);
+            }
+            
+            // 선택된 지표들
+            const selectedMetrics = [];
+            document.querySelectorAll('.metric-checkbox input:checked').forEach(input => {
+                selectedMetrics.push(input.value);
+            });
+            
+            if (selectedMetrics.length === 0) {
+                showError('최소 하나의 지표를 선택해주세요.');
+                return;
+            }
+            
+            params.append('metrics', selectedMetrics.join(','));
+            
+            // UI 상태 변경
+            document.getElementById('generateBtn').disabled = true;
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('error').style.display = 'none';
+            document.getElementById('summary').style.display = 'none';
+            document.getElementById('chartContainer').style.display = 'none';
+            
+            try {
+                const response = await fetch(`/rts/chart/compare_with_chart?${params}`);
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.error || '서버 오류가 발생했습니다.');
+                }
+                
+                // 완료 메시지 및 상세 정보 표시
+                showCompletionMessage(data);
+                
+            } catch (error) {
+                showError(error.message);
+            } finally {
+                document.getElementById('generateBtn').disabled = false;
+                document.getElementById('loading').style.display = 'none';
+            }
+        });
+        
+        function showError(message) {
+            const errorDiv = document.getElementById('error');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+        }
+        
+        function showCompletionMessage(data) {
+            const summaryDiv = document.getElementById('summary');
+            const chartContainer = document.getElementById('chartContainer');
+            
+            // 완료 메시지 표시
+            let completionHtml = `
+                <div style="text-align: center; padding: 20px; background-color: #d4edda; border: 1px solid #c3e6cb; border-radius: 8px; color: #155724;">
+                    <h2 style="margin: 0 0 15px 0;">🎉 ${data.message}</h2>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 20px;">
+                        <div style="background: white; padding: 15px; border-radius: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                            <strong>📊 생성된 지표</strong><br>
+                            <span style="font-size: 1.5em; color: #007bff;">${data.details.metrics_count}개</span>
+                        </div>
+                        <div style="background: white; padding: 15px; border-radius: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                            <strong>📈 데이터 포인트</strong><br>
+                            <span style="font-size: 1.5em; color: #28a745;">${data.details.data_points}개</span>
+                        </div>
+                        <div style="background: white; padding: 15px; border-radius: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                            <strong>⏱️ 처리 시간</strong><br>
+                            <span style="font-size: 1.5em; color: #ffc107;">${data.details.duration}</span>
+                        </div>
+                        <div style="background: white; padding: 15px; border-radius: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                            <strong>✅ Target DB</strong><br>
+                            <span style="font-size: 1.5em; color: #17a2b8;">${data.details.target_success}건</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            // 저장된 파일 정보 추가
+            if (data.details.saved_files) {
+                const files = data.details.saved_files;
+                completionHtml += '<div style="margin-top: 20px; padding: 15px; background-color: #e8f5e8; border-radius: 5px;"><h4>💾 저장된 파일:</h4>';
+                
+                if (files.html) {
+                    const sizeKB = Math.round(files.html.size / 1024);
+                    completionHtml += `<p><strong>📄 HTML 파일:</strong> ${files.html.filename} (${sizeKB} KB)</p>`;
+                } else if (files.info) {
+                    completionHtml += `<p style="color: #666;"><strong>ℹ️ 안내:</strong> ${files.info}</p>`;
+                }
+                
+                if (files.error) {
+                    completionHtml += `<p style="color: red;"><strong>❌ 오류:</strong> ${files.error}</p>`;
+                }
+                
+                if (files.html) {
+                    completionHtml += '<p style="font-size: 0.9em; color: #666; margin: 10px 0 0 0;">📁 HTML 파일이 <code>chart_exports/</code> 디렉토리에 저장되었습니다.<br>브라우저에서 HTML 파일을 직접 열어 인터랙티브 차트를 확인할 수 있습니다.</p>';
+                }
+                
+                completionHtml += '</div>';
+            }
+            
+            summaryDiv.innerHTML = completionHtml;
+            summaryDiv.style.display = 'block';
+            
+            // 차트 컨테이너는 숨김 (파일로만 저장)
+            chartContainer.style.display = 'none';
+        }
+        
+        // 전체 선택/해제 기능
+        document.addEventListener('DOMContentLoaded', function() {
+            // 페이지 로드 시 초기 모드 설정
+            toggleMode();
+            
+            // 현재 시간을 target_datetime 필드의 기본값으로 설정
+            const now = new Date();
+            const year = now.getFullYear();
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const day = String(now.getDate()).padStart(2, '0');
+            const hours = String(now.getHours()).padStart(2, '0');
+            const minutes = String(now.getMinutes()).padStart(2, '0');
+            
+            const currentDateTime = `${year}-${month}-${day}T${hours}:${minutes}`;
+            document.getElementById('target_datetime').value = currentDateTime;
+            
+            const checkboxes = document.querySelectorAll('.metric-checkbox input');
+            const container = document.querySelector('.metrics-group');
+            
+            // 전체 선택/해제 버튼 추가
+            const selectAllDiv = document.createElement('div');
+            selectAllDiv.style.gridColumn = '1 / -1';
+            selectAllDiv.style.marginBottom = '10px';
+            selectAllDiv.innerHTML = `
+                <button type="button" id="selectAll" style="margin-right: 10px;">전체 선택</button>
+                <button type="button" id="selectNone">전체 해제</button>
+            `;
+            container.insertBefore(selectAllDiv, container.firstChild);
+            
+            document.getElementById('selectAll').addEventListener('click', () => {
+                checkboxes.forEach(cb => cb.checked = true);
+            });
+            
+            document.getElementById('selectNone').addEventListener('click', () => {
+                checkboxes.forEach(cb => cb.checked = false);
+            });
+        });
+    </script>
+</body>
+</html>

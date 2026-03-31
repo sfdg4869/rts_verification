@@ -1,0 +1,1185 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RTS Check — MaxGauge 데몬 상태 점검</title>
+<style>
+:root {
+  color-scheme: dark;
+  --theme-background: #08090a;
+  --theme-background-image: radial-gradient(circle at 15% 15%, rgba(98, 114, 255, 0.12), transparent 36%), radial-gradient(circle at 85% 0%, rgba(78, 167, 252, 0.12), transparent 40%);
+  --theme-text-color: #f7f8f8;
+  --theme-text-primary: #f7f8f8;
+  --theme-text-secondary: #c9ceda;
+  --theme-text-muted: #8b8f98;
+  --theme-panel-bg: rgba(255, 255, 255, 0.08);
+  --theme-panel-alt-bg: rgba(255, 255, 255, 0.06);
+  --theme-border-color: rgba(255, 255, 255, 0.15);
+  --theme-border-strong: rgba(255, 255, 255, 0.2);
+  --theme-hover-bg: rgba(255, 255, 255, 0.1);
+  --theme-card-from: rgba(255, 255, 255, 0.12);
+  --theme-card-to: rgba(255, 255, 255, 0.03);
+  --theme-input-bg: rgba(255, 255, 255, 0.04);
+  --theme-input-border: rgba(255, 255, 255, 0.2);
+  --theme-focus-border: rgba(78, 167, 252, 0.6);
+  --theme-focus-ring: rgba(78, 167, 252, 0.25);
+  --theme-selected-border: rgba(78, 167, 252, 0.82);
+  --theme-selected-from: rgba(78, 167, 252, 0.28);
+  --theme-selected-to: rgba(94, 106, 210, 0.18);
+  --theme-shadow-soft: 0 20px 45px -30px rgba(0, 0, 0, 0.8);
+  --theme-shadow-strong: 0 24px 50px -35px rgba(11, 14, 27, 0.95);
+  --theme-backdrop-blur-panel: 20px;
+  --theme-backdrop-blur-panel-alt: 14px;
+
+  --theme-success-text: #4ade80;
+  --theme-success-bg: rgba(74, 222, 128, 0.1);
+  --theme-success-border: rgba(74, 222, 128, 0.4);
+  --theme-warning-text: #fbbf24;
+  --theme-warning-bg: rgba(251, 191, 36, 0.1);
+  --theme-warning-border: rgba(251, 191, 36, 0.4);
+  --theme-error-text: #f87171;
+  --theme-error-bg: rgba(248, 113, 113, 0.1);
+  --theme-error-border: rgba(248, 113, 113, 0.4);
+  --theme-info-text: #60a5fa;
+  --theme-info-bg: rgba(96, 165, 250, 0.1);
+  --theme-info-border: rgba(96, 165, 250, 0.4);
+
+  --theme-primary-bg: linear-gradient(90deg, #5e6ad2 0%, #5e6ad2 52%, #4ea7fc 100%);
+  --theme-primary-text: #ffffff;
+  --theme-primary-shadow: 0 8px 28px -12px rgba(94, 106, 210, 0.75);
+
+  /* legacy aliases used by existing selectors */
+  --bg: var(--theme-background);
+  --surface: var(--theme-panel-bg);
+  --surface2: var(--theme-panel-alt-bg);
+  --border: var(--theme-border-color);
+  --text: var(--theme-text-primary);
+  --text2: var(--theme-text-muted);
+  --accent: #4ea7fc;
+  --accent-hover: #5e6ad2;
+  --pass: var(--theme-success-text);
+  --fail: var(--theme-error-text);
+  --skip: var(--theme-warning-text);
+  --error: var(--theme-error-text);
+  --radius: 10px;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --theme-background: #eef3fb;
+  --theme-background-image: radial-gradient(circle at 12% 12%, rgba(94, 106, 210, 0.16), transparent 36%), radial-gradient(circle at 88% 0%, rgba(78, 167, 252, 0.16), transparent 42%);
+  --theme-text-primary: #111827;
+  --theme-text-color: #111827;
+  --theme-text-muted: #5b6476;
+  --theme-text-secondary: #334155;
+  --theme-panel-bg: rgba(255, 255, 255, 0.82);
+  --theme-panel-alt-bg: rgba(255, 255, 255, 0.72);
+  --theme-border-color: rgba(15, 23, 42, 0.12);
+  --theme-border-strong: rgba(15, 23, 42, 0.18);
+  --theme-hover-bg: rgba(15, 23, 42, 0.06);
+  --theme-card-from: rgba(255, 255, 255, 0.9);
+  --theme-card-to: rgba(232, 239, 255, 0.65);
+  --theme-input-bg: rgba(255, 255, 255, 0.9);
+  --theme-input-border: rgba(15, 23, 42, 0.18);
+  --theme-focus-border: rgba(78, 167, 252, 0.75);
+  --theme-focus-ring: rgba(78, 167, 252, 0.2);
+  --theme-selected-border: rgba(78, 167, 252, 0.72);
+  --theme-selected-from: rgba(78, 167, 252, 0.24);
+  --theme-selected-to: rgba(94, 106, 210, 0.14);
+  --theme-shadow-soft: 0 16px 38px -26px rgba(15, 23, 42, 0.28);
+  --theme-shadow-strong: 0 20px 48px -30px rgba(30, 41, 59, 0.25);
+
+  --theme-success-text: #15803d;
+  --theme-success-bg: #f0fdf4;
+  --theme-success-border: #86efac;
+  --theme-warning-text: #b45309;
+  --theme-warning-bg: #fffbeb;
+  --theme-warning-border: #fcd34d;
+  --theme-error-text: #b91c1c;
+  --theme-error-bg: #fef2f2;
+  --theme-error-border: #fca5a5;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: "Inter", -apple-system, "Apple SD Gothic Neo", sans-serif;
+  background: var(--theme-background);
+  background-image: var(--theme-background-image);
+  color: var(--theme-text-primary);
+  min-height: 100vh;
+}
+
+.container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+header { display: flex; align-items: center; gap: 12px; margin-bottom: 32px; }
+header .header-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.theme-toggle-btn {
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--theme-border-strong);
+  background: var(--theme-panel-alt-bg);
+  color: var(--theme-text-primary);
+  font-size: .8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all .2s;
+}
+.theme-toggle-btn:hover { background: var(--theme-hover-bg); border-color: var(--theme-border-color); }
+header h1 { font-size: 1.5rem; font-weight: 700; }
+header .tag { font-size: .85rem; color: var(--theme-text-muted); background: var(--theme-panel-alt-bg); padding: 4px 10px; border-radius: 999px; border: 1px solid var(--theme-border-color); }
+
+.card {
+  background: linear-gradient(180deg, var(--theme-card-from), var(--theme-card-to));
+  border: 1px solid var(--theme-border-color);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin-bottom: 20px;
+  backdrop-filter: blur(var(--theme-backdrop-blur-panel));
+  box-shadow: var(--theme-shadow-soft);
+}
+.card h2 { font-size: 1.05rem; font-weight: 600; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
+.card h2 .num { background: var(--accent); color: #fff; width: 26px; height: 26px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: .8rem; flex-shrink: 0; }
+
+.table-wrap {
+  position: relative;
+  isolation: isolate;
+  overflow-x: auto;
+  max-height: 340px;
+  overflow-y: auto;
+  border-radius: var(--radius);
+  border: 1px solid var(--theme-border-color);
+  background: var(--theme-panel-alt-bg);
+  box-shadow: var(--theme-shadow-soft);
+}
+table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+thead { z-index: 2; }
+th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: color-mix(in srgb, var(--theme-panel-bg) 92%, #ffffff 8%);
+  color: var(--theme-text-secondary);
+  font-weight: 600;
+  text-align: left;
+  padding: 10px 12px;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--theme-border-color);
+  box-shadow: 0 1px 0 var(--theme-border-color);
+}
+td { padding: 8px 12px; border-top: 1px solid var(--theme-border-color); white-space: nowrap; color: var(--theme-text-primary); }
+tr.selected {
+  background: linear-gradient(90deg, var(--theme-selected-from), var(--theme-selected-to));
+  box-shadow: inset 0 0 0 1px var(--theme-selected-border);
+}
+tbody tr { cursor: pointer; transition: background .15s; }
+tbody tr:hover { background: var(--theme-hover-bg); }
+
+.form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+label { display: block; font-size: .8rem; color: var(--theme-text-muted); margin-bottom: 4px; }
+input, select {
+  width: 100%;
+  background: var(--theme-input-bg);
+  color: var(--theme-text-primary);
+  border: 1px solid var(--theme-input-border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: .9rem;
+  outline: none;
+  transition: border .2s, box-shadow .2s;
+}
+input:focus, select:focus {
+  border-color: var(--theme-focus-border);
+  box-shadow: 0 0 0 3px var(--theme-focus-ring);
+}
+input::placeholder { color: var(--theme-text-muted); }
+
+.btn { display: inline-flex; align-items: center; gap: 6px; padding: 10px 22px; border: none; border-radius: 6px; font-size: .9rem; font-weight: 600; cursor: pointer; transition: all .2s; }
+.btn-primary {
+  background: var(--theme-primary-bg);
+  color: var(--theme-primary-text);
+  box-shadow: var(--theme-primary-shadow);
+}
+.btn-primary:hover { filter: brightness(1.08); }
+.btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+.btn-secondary {
+  background: transparent;
+  color: var(--theme-text-primary);
+  border: 1px solid var(--theme-border-strong);
+}
+.btn-secondary:hover { background: var(--theme-hover-bg); border-color: var(--theme-border-color); }
+.btn-row { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; align-items: center; }
+
+.badge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: .75rem; font-weight: 700; text-transform: uppercase; }
+.badge-pass { background: var(--theme-success-bg); color: var(--theme-success-text); border: 1px solid var(--theme-success-border); }
+.badge-fail { background: var(--theme-error-bg); color: var(--theme-error-text); border: 1px solid var(--theme-error-border); }
+.badge-skip { background: var(--theme-warning-bg); color: var(--theme-warning-text); border: 1px solid var(--theme-warning-border); }
+.badge-error { background: var(--theme-error-bg); color: var(--theme-error-text); border: 1px solid var(--theme-error-border); }
+.badge-connected { background: var(--theme-success-bg); color: var(--theme-success-text); border: 1px solid var(--theme-success-border); }
+.badge-disconnected { background: var(--theme-error-bg); color: var(--theme-error-text); border: 1px solid var(--theme-error-border); }
+
+.result-header { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 16px; }
+.result-header .host { font-size: 1.1rem; font-weight: 600; }
+.result-header .meta { font-size: .8rem; color: var(--theme-text-muted); }
+.step-card {
+  background: var(--theme-panel-alt-bg);
+  border: 1px solid var(--theme-border-color);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin-bottom: 10px;
+  backdrop-filter: blur(var(--theme-backdrop-blur-panel-alt));
+}
+.step-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
+.step-name { font-weight: 600; font-size: .9rem; }
+.step-dur { font-size: .75rem; color: var(--theme-text-muted); }
+.evidence {
+  font-size: .82rem;
+  color: var(--theme-text-secondary);
+  background: var(--theme-panel-bg);
+  border: 1px solid var(--theme-border-color);
+  padding: 8px 12px;
+  border-radius: 8px;
+  margin-top: 6px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 120px;
+  overflow-y: auto;
+  font-family: 'Fira Code', 'Consolas', monospace;
+}
+
+.spinner { display: inline-block; width: 18px; height: 18px; border: 3px solid var(--theme-border-color); border-top-color: var(--accent); border-radius: 50%; animation: spin .6s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.empty { text-align: center; padding: 40px; color: var(--theme-text-muted); }
+.hidden { display: none; }
+
+.overall-pass { border-left: 4px solid var(--pass); }
+.overall-fail { border-left: 4px solid var(--fail); }
+.overall-error { border-left: 4px solid var(--error); }
+
+.step-labels { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.step-label { font-size: .7rem; padding: 2px 8px; border-radius: 4px; background: var(--theme-panel-alt-bg); color: var(--theme-text-muted); border: 1px solid var(--theme-border-color); }
+
+.status-msg { font-size: .85rem; padding: 4px 0; color: var(--theme-text-muted); }
+.status-msg.ok { color: var(--pass); }
+.status-msg.err { color: var(--fail); }
+
+.repo-info { display: flex; gap: 16px; flex-wrap: wrap; font-size: .85rem; color: var(--theme-text-muted); padding: 10px 14px; background: var(--theme-panel-alt-bg); border: 1px solid var(--theme-border-color); border-radius: 8px; margin-bottom: 14px; }
+.repo-info span { white-space: nowrap; }
+.repo-info .val { color: var(--theme-text-primary); font-weight: 600; }
+
+.tab-bar { display: flex; gap: 0; margin-bottom: 16px; border-bottom: 2px solid var(--theme-border-color); }
+.tab-bar button { background: none; border: none; color: var(--theme-text-muted); padding: 8px 18px; font-size: .9rem; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; transition: all .2s; }
+.tab-bar button.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+.tab-bar button:hover { color: var(--theme-text-primary); }
+.tab-pane { display: none; }
+.tab-pane.active { display: block; }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>RTS Check</h1>
+    <span class="tag">MaxGauge 데몬 상태 점검</span>
+    <div class="header-actions">
+      <button class="theme-toggle-btn" id="themeToggleBtn" type="button">Dark</button>
+    </div>
+  </header>
+
+  <!-- ────── Step 1: Repo DB 연결 ────── -->
+  <div class="card" id="repoCard">
+    <h2><span class="num">1</span> Repo DB 연결</h2>
+    <div id="repoStatus"></div>
+
+    <div class="tab-bar" id="repoTabs">
+      <button class="active" data-tab="tabMongo">MongoDB 저장 목록</button>
+      <button data-tab="tabDirect">직접 입력</button>
+    </div>
+
+    <!-- Tab: MongoDB 저장 목록 -->
+    <div class="tab-pane active" id="tabMongo">
+      <div class="btn-row" style="margin-top:0;margin-bottom:14px">
+        <button class="btn btn-secondary" id="btnLoadMongo">MongoDB DB 목록 불러오기</button>
+        <span id="mongoMsg" class="hidden status-msg"></span>
+      </div>
+      <div id="mongoListWrap" class="hidden">
+        <div class="table-wrap" style="max-height:260px">
+          <table>
+            <thead><tr>
+              <th></th><th>Name</th><th>Host</th><th>Port</th><th>DB Type</th><th>Database</th><th>User</th><th>Description</th>
+            </tr></thead>
+            <tbody id="mongoTable"></tbody>
+          </table>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-primary" id="btnApplyMongo" disabled>Repo DB로 설정</button>
+          <span id="applyMongoMsg" class="hidden status-msg"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab: 직접 입력 -->
+    <div class="tab-pane" id="tabDirect">
+      <div class="form-grid">
+        <div>
+          <label>Name</label>
+          <input id="repoName" type="text" placeholder="예: 25FIN ORACLE REPO">
+        </div>
+        <div>
+          <label>Description</label>
+          <input id="repoDescription" type="text" placeholder="예: 분기 테스트용 Repo DB">
+        </div>
+        <div>
+          <label>DB 유형 *</label>
+          <select id="repoDbType">
+            <option value="postgresql">PostgreSQL</option>
+            <option value="oracle">Oracle</option>
+          </select>
+        </div>
+        <div>
+          <label>Host *</label>
+          <input id="repoHost" type="text" placeholder="192.168.0.100">
+        </div>
+        <div>
+          <label>Port *</label>
+          <input id="repoPort" type="number" placeholder="5432">
+        </div>
+        <div>
+          <label>User *</label>
+          <input id="repoUser" type="text" placeholder="maxgauge">
+        </div>
+        <div>
+          <label>Password *</label>
+          <input id="repoPass" type="password" placeholder="비밀번호">
+        </div>
+        <div>
+          <label>Database (Service/SID) *</label>
+          <input id="repoDatabase" type="text" placeholder="maxgauge">
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" id="btnRepoConnect">연결 테스트 &amp; 저장</button>
+        <span id="directMsg" class="hidden status-msg"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ────── Step 2: Target DB 선택 ────── -->
+  <div class="card">
+    <h2><span class="num">2</span> Target DB 선택 (APM_DB_INFO)</h2>
+    <div class="btn-row" style="margin-top:0;margin-bottom:14px">
+      <button class="btn btn-primary" id="btnLoadDb" disabled>DB 목록 조회</button>
+      <span id="dbStatus" class="hidden" style="font-size:.85rem;color:var(--text2)"></span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>DB ID</th><th>INSTANCE</th><th>HOST IP</th><th>HOST NAME</th>
+          <th>DB USER</th><th>SID</th><th>LSNR PORT</th><th>OS</th>
+        </tr></thead>
+        <tbody id="dbTable"><tr><td colspan="8" class="empty">Repo DB 연결 후 목록을 조회하세요</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ────── Step 3: SSH 접속 정보 ────── -->
+  <div class="card">
+    <h2><span class="num">3</span> SSH 접속 정보 &amp; 옵션</h2>
+    <div class="status-msg" style="color:var(--text2);margin-bottom:10px">
+      ※ SSH 정보는 <b>Target 점검 실행</b>(RTS 7단계)에서만 사용됩니다. <b>Repo 점검 실행</b>에는 사용되지 않습니다.
+    </div>
+    <div class="form-grid">
+      <div>
+        <label>SSH User *</label>
+        <input id="sshUser" type="text" placeholder="maxgauge">
+      </div>
+      <div>
+        <label>SSH Password *</label>
+        <input id="sshPassword" type="password" placeholder="비밀번호 (저장 안 함)">
+      </div>
+      <div>
+        <label>SSH Port</label>
+        <input id="sshPort" type="number" value="22">
+      </div>
+      <div>
+        <label>Conf Name (미입력 시 INSTANCE_NAME)</label>
+        <input id="confName" type="text" placeholder="자동">
+      </div>
+      <div>
+        <label>Base Dir (미입력 시 자동 탐색)</label>
+        <input id="baseDir" type="text" placeholder="/home/maxgauge">
+      </div>
+      <div>
+        <label>Host Override (미입력 시 HOST_IP)</label>
+        <input id="hostOverride" type="text" placeholder="">
+      </div>
+      <div>
+        <label>실패 시 정책</label>
+        <select id="onFailure">
+          <option value="run_all">run_all — 전체 실행</option>
+          <option value="stop_at_first_failure">stop_at_first_failure — 첫 실패에서 중단</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <!-- ────── Step 4: 점검 실행 ────── -->
+  <div class="card">
+    <h2><span class="num">4</span> Target DB 접속정보 (쿼리 실행 전용)</h2>
+    <div class="status-msg" style="color:var(--text2);margin-bottom:10px">
+      ※ Step 2에서 선택한 Target DB 정보(host/port/user/sid)를 사용합니다. 비밀번호만 입력하세요.
+    </div>
+    <div id="targetSelectedInfo" class="repo-info" style="margin-bottom:10px">
+      <span class="badge badge-disconnected">NO TARGET</span>
+      <span>Step 2에서 Target DB를 선택해주세요</span>
+    </div>
+    <div class="form-grid">
+      <div>
+        <label>Target Password *</label>
+        <input id="targetPassword" type="password" placeholder="선택한 Target DB 계정 비밀번호">
+      </div>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" id="btnRunTargetSql" disabled>Target 쿼리 실행(3개)</button>
+      <span id="targetSqlStatus" class="hidden"></span>
+    </div>
+  </div>
+
+  <!-- ────── Step 5: 점검 실행 ────── -->
+  <div class="card">
+    <h2><span class="num">5</span> 점검 실행</h2>
+    <div class="status-msg" style="color:var(--text2);margin-bottom:6px">Target 점검 항목</div>
+    <div class="step-labels">
+      <span class="step-label">1. 로그 디렉터리</span>
+      <span class="step-label">2. rtsctl stat</span>
+      <span class="step-label">3. PID 교차검증</span>
+      <span class="step-label">4. ERROR grep</span>
+      <span class="step-label">5. CPU/MEM</span>
+      <span class="step-label">6. 비정상 종료 시그널</span>
+      <span class="step-label">7. Target 조회(v$sql)</span>
+    </div>
+    <div class="status-msg" style="color:var(--text2);margin:4px 0 6px">Repo 점검 항목</div>
+    <div class="step-labels">
+      <span class="step-label">1. APM_TOP_OS_PROCESS_LIST 누락 재현 여부</span>
+      <span class="step-label">2. ORA_SQL_ELAPSE 1초 이상 로깅</span>
+      <span class="step-label">3. ORA_SQL_STAT_10MIN 50초 이상 로깅</span>
+      <span class="step-label">4. ORA_SQL_ELAPSE Elapsed/Execution 로깅</span>
+      <span class="step-label">5. ORA_SQL_ELAPSE 대상 SQL 수집 확인</span>
+      <span class="step-label">6. ORA_SQL_STAT_10MIN 대상 SQL 수집 확인</span>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-primary" id="btnRun" disabled>Target 점검 실행</button>
+      <button class="btn btn-primary" id="btnRunRepo">Repo 점검 실행</button>
+      <span id="runStatus" class="hidden"></span>
+    </div>
+    <div class="status-msg" style="color:var(--text2);margin-top:8px">
+      Repo 점검 실행은 <b>Step 1 Repo DB 연결값</b>만 사용합니다.
+    </div>
+  </div>
+
+  <!-- ────── CPU/MEM 전용 조회 (Step 5 아래) ────── -->
+  <div class="card">
+    <h2>CPU / MEM 전용 조회</h2>
+    <div class="status-msg" style="color:var(--text2);margin-bottom:8px">
+      Step 2 Target + Step 3 SSH 정보를 사용해 현재값/2시간 집계를 조회합니다. (in-memory 저장)
+    </div>
+    <div class="btn-row" style="margin-top:0">
+      <button class="btn btn-primary" id="btnCpuMemSnapshot" disabled>현재값 조회</button>
+      <button class="btn btn-primary" id="btnCpuMemWindow" disabled>2시간 집계 조회</button>
+      <span id="cpuMemStatus" class="hidden"></span>
+    </div>
+    <div id="cpuMemResult" class="hidden" style="margin-top:10px"></div>
+  </div>
+
+  <!-- ────── Results ────── -->
+  <div id="resultArea" class="hidden">
+    <div class="card" id="resultCard">
+      <h2>점검 결과</h2>
+      <div id="resultContent"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const API_RTS = '/api/v2/rts/check';
+const API_MONGO = '/api/v1';
+let selectedRow = null;
+let repoReady = false;
+let selectedMongoId = null;
+const THEME_KEY = 'rts-check-theme';
+
+const $ = id => document.getElementById(id);
+
+function applyTheme(theme) {
+  const isLight = theme === 'light';
+  document.documentElement.setAttribute('data-theme', isLight ? 'light' : 'dark');
+  const btn = $('themeToggleBtn');
+  if (btn) btn.textContent = isLight ? 'Dark' : 'Light';
+}
+
+function initThemeToggle() {
+  let current = localStorage.getItem(THEME_KEY);
+  if (current !== 'light' && current !== 'dark') {
+    current = document.documentElement.getAttribute('data-theme') || 'light';
+  }
+  applyTheme(current);
+
+  const btn = $('themeToggleBtn');
+  if (!btn) return;
+  btn.onclick = () => {
+    const now = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+    const next = now === 'light' ? 'dark' : 'light';
+    applyTheme(next);
+    localStorage.setItem(THEME_KEY, next);
+  };
+}
+
+// ─── Tabs ──────────────────────────────────
+document.querySelectorAll('#repoTabs button').forEach(btn => {
+  btn.onclick = () => {
+    document.querySelectorAll('#repoTabs button').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    $(btn.dataset.tab).classList.add('active');
+  };
+});
+
+// ─── Repo Status (on page load) ────────────
+async function loadRepoStatus() {
+  try {
+    const res = await fetch(`${API_RTS}/repo-status`);
+    const d = await res.json();
+
+    if (d.connected) {
+      $('repoStatus').innerHTML = `<div class="repo-info">
+        <span class="badge badge-connected">CONNECTED</span>
+        <span>Type: <span class="val">${d.db_type || '-'}</span></span>
+        <span>Host: <span class="val">${d.host}:${d.port}</span></span>
+        <span>DB: <span class="val">${d.database || '-'}</span></span>
+        <span>User: <span class="val">${d.user || '-'}</span></span>
+      </div>`;
+      setRepoReady(true);
+    } else {
+      $('repoStatus').innerHTML = `<div class="repo-info"><span class="badge badge-disconnected">NOT CONNECTED</span><span>Repo DB를 설정해주세요</span></div>`;
+      setRepoReady(false);
+    }
+  } catch (e) {
+    $('repoStatus').innerHTML = `<div class="repo-info"><span class="badge badge-disconnected">ERROR</span><span>${e.message}</span></div>`;
+    setRepoReady(false);
+  }
+}
+
+function setRepoReady(ok) {
+  repoReady = ok;
+  $('btnLoadDb').disabled = !ok;
+}
+
+// ─── MongoDB DB 목록 불러오기 ──────────────
+$('btnLoadMongo').onclick = async () => {
+  const btn = $('btnLoadMongo');
+  const msg = $('mongoMsg');
+  btn.disabled = true;
+  msg.classList.remove('hidden');
+  msg.className = 'status-msg';
+  msg.innerHTML = '<span class="spinner"></span> MongoDB 조회 중...';
+
+  try {
+    const res = await fetch(`${API_MONGO}/db_list`);
+    const list = await res.json();
+
+    if (!res.ok) throw new Error(list.message || list.error || 'Failed');
+
+    if (Array.isArray(list) && list.length > 0) {
+      renderMongoTable(list);
+      msg.className = 'status-msg ok';
+      msg.textContent = `${list.length}건의 DB 설정을 찾았습니다.`;
+      $('mongoListWrap').classList.remove('hidden');
+    } else {
+      msg.className = 'status-msg err';
+      msg.textContent = 'MongoDB에 저장된 DB 설정이 없습니다. 직접 입력 탭을 사용하세요.';
+      $('mongoListWrap').classList.add('hidden');
+    }
+  } catch (e) {
+    msg.className = 'status-msg err';
+    msg.textContent = 'MongoDB 조회 실패: ' + e.message;
+    $('mongoListWrap').classList.add('hidden');
+  } finally {
+    btn.disabled = false;
+  }
+};
+
+function renderMongoTable(list) {
+  const tbody = $('mongoTable');
+  tbody.innerHTML = list.map(r => `
+    <tr data-config-id="${escHtml(r.id || '')}">
+      <td><input type="radio" name="mongoSel" value="${escHtml(r.id || '')}"></td>
+      <td>${escHtml(r.name || '-')}</td>
+      <td>${escHtml(r.host || '-')}</td>
+      <td>${r.db_port || r.port || '-'}</td>
+      <td>${escHtml(r.db_type || '-')}</td>
+      <td>${escHtml(r.database || r.service || '-')}</td>
+      <td>${escHtml(r.db_user || r.user || '-')}</td>
+      <td>${escHtml(r.description || '-')}</td>
+    </tr>
+  `).join('');
+
+  selectedMongoId = null;
+  $('btnApplyMongo').disabled = true;
+
+  tbody.querySelectorAll('tr').forEach(tr => {
+    tr.onclick = () => {
+      tbody.querySelectorAll('tr').forEach(t => t.classList.remove('selected'));
+      tr.classList.add('selected');
+      tr.querySelector('input[type=radio]').checked = true;
+      selectedMongoId = tr.dataset.configId;
+      $('btnApplyMongo').disabled = false;
+    };
+  });
+}
+
+// ─── MongoDB config → Repo DB로 설정 ──────
+$('btnApplyMongo').onclick = async () => {
+  if (!selectedMongoId) return;
+  const btn = $('btnApplyMongo');
+  const msg = $('applyMongoMsg');
+  btn.disabled = true;
+  msg.classList.remove('hidden');
+  msg.className = 'status-msg';
+  msg.innerHTML = '<span class="spinner"></span> Repo DB 설정 중...';
+
+  try {
+    const res = await fetch(`${API_RTS}/set-repo`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({config_id: selectedMongoId}),
+    });
+    const json = await res.json();
+    if (json.success) {
+      msg.className = 'status-msg ok';
+      msg.textContent = json.message;
+      await loadRepoStatus();
+      await loadDbList();
+    } else {
+      throw new Error(json.error || 'Failed');
+    }
+  } catch (e) {
+    msg.className = 'status-msg err';
+    msg.textContent = e.message;
+  } finally {
+    btn.disabled = false;
+  }
+};
+
+// ─── Direct Repo Connect ───────────────────
+$('btnRepoConnect').onclick = async () => {
+  const btn = $('btnRepoConnect');
+  const msg = $('directMsg');
+  btn.disabled = true;
+  msg.classList.remove('hidden');
+  msg.className = 'status-msg';
+  msg.innerHTML = '<span class="spinner"></span> 연결 테스트 중...';
+
+  const body = {
+    name: $('repoName').value.trim(),
+    description: $('repoDescription').value.trim(),
+    db_type: $('repoDbType').value,
+    host: $('repoHost').value.trim(),
+    port: parseInt($('repoPort').value) || ($('repoDbType').value === 'oracle' ? 1521 : 5432),
+    user: $('repoUser').value.trim(),
+    password: $('repoPass').value,
+    database: $('repoDatabase').value.trim(),
+  };
+
+  if (!body.host || !body.user || !body.password || !body.database) {
+    msg.className = 'status-msg err';
+    msg.textContent = '모든 필수 항목을 입력해주세요';
+    btn.disabled = false;
+    return;
+  }
+
+  try {
+    const res = await fetch(`${API_RTS}/set-repo-direct`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    const json = await res.json();
+    if (json.success) {
+      msg.className = 'status-msg ok';
+      msg.textContent = json.message;
+      await loadRepoStatus();
+      await loadDbList();
+    } else {
+      throw new Error(json.error || 'Failed');
+    }
+  } catch (e) {
+    msg.className = 'status-msg err';
+    msg.textContent = e.message;
+  } finally {
+    btn.disabled = false;
+  }
+};
+
+// ─── DB List (APM_DB_INFO) ─────────────────
+async function loadDbList() {
+  const btn = $('btnLoadDb');
+  const st = $('dbStatus');
+  btn.disabled = true;
+  st.classList.remove('hidden');
+  st.style.color = 'var(--text2)';
+  st.innerHTML = '<span class="spinner"></span> APM_DB_INFO 조회 중...';
+  try {
+    const res = await fetch(`${API_RTS}/db-list`);
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || 'Failed');
+    renderDbTable(json.data || []);
+    st.textContent = `${json.count || 0}건 조회됨`;
+  } catch (e) {
+    st.textContent = '조회 실패: ' + e.message;
+    st.style.color = 'var(--fail)';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+$('btnLoadDb').onclick = loadDbList;
+
+function renderDbTable(rows) {
+  const tbody = $('dbTable');
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="8" class="empty">데이터가 없습니다</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map(r => `
+    <tr data-id="${r.db_id}" data-ip="${r.host_ip || ''}" data-inst="${r.instance_name || ''}" data-user="${r.db_user || ''}" data-sid="${r.sid || ''}" data-port="${r.lsnr_port || ''}">
+      <td>${r.db_id}</td><td>${r.instance_name || '-'}</td><td>${r.host_ip || '-'}</td>
+      <td>${r.host_name || '-'}</td><td>${r.db_user || '-'}</td>
+      <td>${r.sid || '-'}</td><td>${r.lsnr_port || '-'}</td><td>${r.os_type || '-'}</td>
+    </tr>
+  `).join('');
+  tbody.querySelectorAll('tr').forEach(tr => {
+    tr.onclick = () => selectRow(tr);
+  });
+}
+
+function selectRow(tr) {
+  document.querySelectorAll('#dbTable tr.selected').forEach(t => t.classList.remove('selected'));
+  tr.classList.add('selected');
+  selectedRow = {
+    db_id: parseInt(tr.dataset.id),
+    host_ip: tr.dataset.ip,
+    instance_name: tr.dataset.inst,
+    db_user: tr.dataset.user || '',
+    sid: tr.dataset.sid || '',
+    lsnr_port: tr.dataset.port || '',
+  };
+  $('targetSelectedInfo').innerHTML = `
+    <span class="badge badge-connected">TARGET SELECTED</span>
+    <span>db_id: <span class="val">${selectedRow.db_id}</span></span>
+    <span>host: <span class="val">${escHtml(selectedRow.host_ip || '-')}:${escHtml(String(selectedRow.lsnr_port || '-'))}</span></span>
+    <span>user: <span class="val">${escHtml(selectedRow.db_user || '-')}</span></span>
+    <span>sid: <span class="val">${escHtml(selectedRow.sid || '-')}</span></span>
+    <span>instance: <span class="val">${escHtml(selectedRow.instance_name || '-')}</span></span>
+  `;
+  $('targetPassword').value = '';
+  $('btnRun').disabled = false;
+  $('btnRunTargetSql').disabled = false;
+  $('btnCpuMemSnapshot').disabled = false;
+  $('btnCpuMemWindow').disabled = false;
+}
+
+// ─── Run Check ─────────────────────────────
+$('btnRun').onclick = async () => {
+  if (!selectedRow) return;
+  const btn = $('btnRun');
+  const st = $('runStatus');
+  btn.disabled = true;
+  st.classList.remove('hidden');
+  st.style.color = 'var(--text2)';
+  st.innerHTML = '<span class="spinner"></span> Target 점검 진행 중... (SSH 접속 → 7단계 순차 실행)';
+  $('resultArea').classList.add('hidden');
+
+  const body = {
+    db_id: selectedRow.db_id,
+    ssh_user: $('sshUser').value.trim(),
+    ssh_password: $('sshPassword').value,
+    ssh_port: parseInt($('sshPort').value) || 22,
+    on_failure: $('onFailure').value,
+  };
+  const cn = $('confName').value.trim();
+  const bd = $('baseDir').value.trim();
+  const ho = $('hostOverride').value.trim();
+  if (cn) body.conf_name = cn;
+  if (bd) body.base_dir = bd;
+  if (ho) body.host_override = ho;
+
+  if (!body.ssh_user || !body.ssh_password) {
+    st.textContent = 'SSH User / Password를 입력해주세요';
+    st.style.color = 'var(--fail)';
+    btn.disabled = false;
+    return;
+  }
+
+  try {
+    const res = await fetch(`${API_RTS}/run`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    const json = await res.json();
+    st.classList.add('hidden');
+    renderResult(json);
+  } catch (e) {
+    st.textContent = '요청 실패: ' + e.message;
+    st.style.color = 'var(--fail)';
+  } finally {
+    btn.disabled = false;
+  }
+};
+
+// ─── Run Repo Check ────────────────────────
+$('btnRunRepo').onclick = async () => {
+  const btn = $('btnRunRepo');
+  const st = $('runStatus');
+  if (!repoReady) {
+    st.classList.remove('hidden');
+    st.style.color = 'var(--fail)';
+    st.textContent = 'Repo DB 연결 후 실행해주세요.';
+    await loadRepoStatus();
+    return;
+  }
+  btn.disabled = true;
+  st.classList.remove('hidden');
+  st.style.color = 'var(--text2)';
+  st.innerHTML = '<span class="spinner"></span> Repo 점검 진행 중... (6개 항목 점검)';
+  $('resultArea').classList.add('hidden');
+
+  const body = {
+    recent_minutes: 30,
+  };
+
+  try {
+    const res = await fetch(`${API_RTS}/run-repo`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    const json = await res.json();
+    st.classList.add('hidden');
+    renderResult(json);
+  } catch (e) {
+    st.textContent = '요청 실패: ' + e.message;
+    st.style.color = 'var(--fail)';
+  } finally {
+    btn.disabled = false;
+  }
+};
+
+// ─── Run Target SQL Test ───────────────────
+$('btnRunTargetSql').onclick = async () => {
+  const statusEl = $('targetSqlStatus');
+  if (!selectedRow?.db_id) {
+    statusEl.classList.remove('hidden');
+    statusEl.style.color = 'var(--fail)';
+    statusEl.textContent = 'Step 2에서 Target DB를 먼저 선택해주세요.';
+    return;
+  }
+
+  const host = (selectedRow.host_ip || '').trim();
+  const port = parseInt(selectedRow.lsnr_port || 1521) || 1521;
+  const user = (selectedRow.db_user || '').trim();
+  const password = $('targetPassword').value;
+  const sid = (selectedRow.sid || '').trim();
+  const instanceName = (selectedRow.instance_name || '').trim();
+
+  if (!host || !user || !password || !sid) {
+    statusEl.classList.remove('hidden');
+    statusEl.style.color = 'var(--fail)';
+    statusEl.textContent = '선택한 Target 정보가 부족하거나 비밀번호가 비어있습니다.';
+    return;
+  }
+
+  const btn = $('btnRunTargetSql');
+  btn.disabled = true;
+  statusEl.classList.remove('hidden');
+  statusEl.style.color = 'var(--text2)';
+  statusEl.innerHTML = '<span class="spinner"></span> Target 쿼리 실행 중...';
+  $('resultArea').classList.add('hidden');
+
+  try {
+    const res = await fetch(`${API_RTS}/run-target-sql`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        target_config: {
+          host,
+          port,
+          user,
+          password,
+          sid,
+          instance_name: instanceName || undefined,
+        },
+      }),
+    });
+    const json = await res.json();
+    statusEl.classList.add('hidden');
+    renderResult(json);
+  } catch (e) {
+    statusEl.textContent = '요청 실패: ' + e.message;
+    statusEl.style.color = 'var(--fail)';
+  } finally {
+    btn.disabled = false;
+  }
+};
+
+// ─── CPU/MEM Panel ─────────────────────────
+function getCpuMemReqBody() {
+  if (!selectedRow) throw new Error('Step 2에서 Target DB를 먼저 선택해주세요.');
+  const sshUser = $('sshUser').value.trim();
+  const sshPassword = $('sshPassword').value;
+  if (!sshUser || !sshPassword) throw new Error('Step 3의 SSH User/Password를 입력해주세요.');
+
+  const body = {
+    db_id: selectedRow.db_id,
+    ssh_user: sshUser,
+    ssh_password: sshPassword,
+    ssh_port: parseInt($('sshPort').value) || 22,
+  };
+  const cn = $('confName').value.trim();
+  const bd = $('baseDir').value.trim();
+  const ho = $('hostOverride').value.trim();
+  if (cn) body.conf_name = cn;
+  if (bd) body.base_dir = bd;
+  if (ho) body.host_override = ho;
+  return body;
+}
+
+function renderCpuMemResult(data) {
+  const wrap = $('cpuMemResult');
+  wrap.classList.remove('hidden');
+  if (data.error) {
+    wrap.innerHTML = `<div class="step-card"><div class="evidence">${escHtml(data.error)}</div></div>`;
+    return;
+  }
+
+  const head = `
+    <div class="result-header">
+      <span class="host">${escHtml(data.host_ip || '-')}</span>
+      ${badge(data.overall_status || 'error')}
+      <span class="meta">
+        mode: ${escHtml(data.mode || '-')} &nbsp;|&nbsp;
+        conf: ${escHtml(data.conf_name || '-')} &nbsp;|&nbsp;
+        ${data.mode === 'window' ? `window: ${data.window_minutes || 120}m &nbsp;|&nbsp; samples: ${data.sample_count_total || 0} &nbsp;|&nbsp;` : ''}
+        ${data.total_duration_ms || 0}ms
+      </span>
+    </div>
+  `;
+
+  const rows = (data.metrics || []).map(m => `
+    <div class="step-card">
+      <div class="step-head">
+        <span class="step-name">${escHtml(m.daemon || '-')}</span>
+        ${badge(m.status || (m.sample_count > 0 ? 'pass' : 'fail'))}
+      </div>
+      <div class="evidence">${
+        data.mode === 'window'
+          ? escHtml(
+              `sample_count=${m.sample_count || 0}\n` +
+              `cpu_avg=${m.cpu_avg_pct ?? '-'}%, cpu_max=${m.cpu_max_pct ?? '-'}%\n` +
+              `mem_avg=${m.mem_avg_pct ?? '-'}%, mem_max=${m.mem_max_pct ?? '-'}%\n` +
+              `rss_avg=${m.rss_avg_kb ?? '-'}KB, rss_max=${m.rss_max_kb ?? '-'}KB`
+            )
+          : escHtml(
+              `pid=${m.pid || '-'}\n` +
+              `cpu=${m.cpu_pct ?? '-'}%, mem=${m.mem_pct ?? '-'}%, rss=${m.rss_kb ?? '-'}KB\n` +
+              `${m.evidence || ''}`
+            )
+      }</div>
+    </div>
+  `).join('');
+
+  const note = data.note ? `<div class="status-msg" style="margin-top:6px">${escHtml(data.note)}</div>` : '';
+  wrap.innerHTML = head + rows + note;
+}
+
+$('btnCpuMemSnapshot').onclick = async () => {
+  const btn = $('btnCpuMemSnapshot');
+  const st = $('cpuMemStatus');
+  const other = $('btnCpuMemWindow');
+  try {
+    const body = getCpuMemReqBody();
+    btn.disabled = true;
+    other.disabled = true;
+    st.classList.remove('hidden');
+    st.style.color = 'var(--text2)';
+    st.innerHTML = '<span class="spinner"></span> CPU/MEM 현재값 조회 중...';
+    const res = await fetch(`${API_RTS}/cpu-mem/snapshot`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    const json = await res.json();
+    st.classList.add('hidden');
+    renderCpuMemResult(json);
+  } catch (e) {
+    st.classList.remove('hidden');
+    st.style.color = 'var(--fail)';
+    st.textContent = e.message;
+  } finally {
+    btn.disabled = !selectedRow;
+    other.disabled = !selectedRow;
+  }
+};
+
+$('btnCpuMemWindow').onclick = async () => {
+  const btn = $('btnCpuMemWindow');
+  const st = $('cpuMemStatus');
+  const other = $('btnCpuMemSnapshot');
+  try {
+    const body = getCpuMemReqBody();
+    body.window_minutes = 120;
+    btn.disabled = true;
+    other.disabled = true;
+    st.classList.remove('hidden');
+    st.style.color = 'var(--text2)';
+    st.innerHTML = '<span class="spinner"></span> CPU/MEM 2시간 집계 조회 중...';
+    const res = await fetch(`${API_RTS}/cpu-mem/window`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    const json = await res.json();
+    st.classList.add('hidden');
+    renderCpuMemResult(json);
+  } catch (e) {
+    st.classList.remove('hidden');
+    st.style.color = 'var(--fail)';
+    st.textContent = e.message;
+  } finally {
+    btn.disabled = !selectedRow;
+    other.disabled = !selectedRow;
+  }
+};
+
+// ─── Render Result ─────────────────────────
+const STEP_NAMES = {
+  log_directory_check: '1. 로그 디렉터리 존재',
+  rtsctl_stat: '2. rtsctl stat (RUNNING 확인)',
+  pid_cross_check: '3. PID 교차 검증',
+  error_log_grep: '4. ERROR 로그 grep',
+  resource_usage: '5. CPU / MEM 사용률',
+  abnormal_signal_check: '6. 비정상 종료 시그널',
+  target_vsql_query: '7. Target 조회(v$sql 결과)',
+  repo_apm_top_os_process_list_no_missing: '1. APM_TOP_OS_PROCESS_LIST 누락 재현 여부',
+  repo_ora_sql_elapse_over_1s_logged: '2. ORA_SQL_ELAPSE 1초 이상 Elapsed 로깅',
+  repo_ora_sql_stat_10min_over_50s_only: '3. ORA_SQL_STAT_10MIN 50초 이상만 로깅 여부',
+  repo_ora_sql_elapse_over_1s_elapsed_execution_logged: '4. ORA_SQL_ELAPSE Elapsed/Execution 로깅',
+  repo_ora_sql_elapse_target_sql_collect_check: '5. ORA_SQL_ELAPSE 대상 SQL ELAPSE 수집 확인',
+  repo_ora_sql_stat_10min_target_sql_collect_check: '6. ORA_SQL_STAT_10MIN 대상 SQL 수집 확인',
+  target_check_alter_system: 'Target 1. ALTER SYSTEM 권한 확인',
+  target_check_dbms_utility_priv: 'Target 2. DBMS_UTILITY 권한 확인',
+  target_create_minitest_proc: 'Target 3. QS_SQL_MINITEST_PROC 생성',
+  target_run_minitest_block: 'Target 4. 미니테스트 블록 실행',
+  target_query_result_step7: '7. Target 조회(v$sql 결과)',
+};
+
+function badge(status) {
+  const cls = {pass:'badge-pass', fail:'badge-fail', skip:'badge-skip', error:'badge-error'}[status] || 'badge-error';
+  return `<span class="badge ${cls}">${status}</span>`;
+}
+
+function renderResult(r) {
+  const area = $('resultArea');
+  const card = $('resultCard');
+  const content = $('resultContent');
+  area.classList.remove('hidden');
+
+  card.className = 'card overall-' + (r.overall_status || 'error');
+
+  if (r.error && !r.steps?.length) {
+    content.innerHTML = `<div style="color:var(--fail);font-weight:600">${escHtml(r.error)}</div>`;
+    return;
+  }
+
+  const isRepoResult = (r.steps || []).some(s => String(s.step || '').startsWith('repo_'));
+  let html = '';
+  if (isRepoResult) {
+    const repo = r.repo || {};
+    html = `
+      <div class="result-header">
+        <span class="host">Repo DB</span>
+        <span class="meta">
+          type: ${escHtml(repo.db_type || '-')} &nbsp;|&nbsp;
+          host: ${escHtml(repo.host || '-')}:${escHtml(String(repo.port || '-'))} &nbsp;|&nbsp;
+          db: ${escHtml(repo.database || '-')} &nbsp;|&nbsp;
+          user: ${escHtml(repo.user || '-')} &nbsp;|&nbsp;
+          window: ${r.recent_minutes || 30}m &nbsp;|&nbsp; ${r.total_duration_ms || 0}ms
+        </span>
+      </div>
+    `;
+  } else {
+    html = `
+      <div class="result-header">
+        <span class="host">${escHtml(r.host_ip || '?')}</span>
+        ${badge(r.overall_status)}
+        <span class="meta">conf: ${escHtml(r.conf_name || '-')} &nbsp;|&nbsp; instance: ${escHtml(r.instance_name || '-')} &nbsp;|&nbsp; db_id: ${r.db_id} &nbsp;|&nbsp; ${r.total_duration_ms || 0}ms</span>
+      </div>
+    `;
+  }
+  if (r.error) {
+    html += `<div style="color:var(--error);margin-bottom:12px;font-size:.85rem">${escHtml(r.error)}</div>`;
+  }
+  (r.steps || []).forEach(s => {
+    html += `
+      <div class="step-card">
+        <div class="step-head">
+          <span class="step-name">${STEP_NAMES[s.step] || s.step}</span>
+          <span style="display:flex;align-items:center;gap:8px">
+            ${badge(s.status)}
+            <span class="step-dur">${s.duration_ms}ms</span>
+          </span>
+        </div>
+        <div class="evidence">${escHtml(s.evidence || '')}</div>
+      </div>
+    `;
+  });
+  content.innerHTML = html;
+  area.scrollIntoView({behavior: 'smooth', block: 'start'});
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function resetTargetDbArea() {
+  selectedRow = null;
+  $('btnRun').disabled = true;
+  $('btnRunTargetSql').disabled = true;
+  $('btnCpuMemSnapshot').disabled = true;
+  $('btnCpuMemWindow').disabled = true;
+  $('targetPassword').value = '';
+  $('targetSelectedInfo').innerHTML = '<span class="badge badge-disconnected">NO TARGET</span><span>Step 2에서 Target DB를 선택해주세요</span>';
+  $('dbTable').innerHTML = '<tr><td colspan="8" class="empty">Repo DB 연결 후 목록을 조회하세요</td></tr>';
+  $('dbStatus').classList.add('hidden');
+}
+
+function resetResultArea() {
+  $('resultArea').classList.add('hidden');
+  $('resultContent').innerHTML = '';
+  $('runStatus').classList.add('hidden');
+  $('runStatus').textContent = '';
+  $('targetSqlStatus').classList.add('hidden');
+  $('targetSqlStatus').textContent = '';
+  $('cpuMemResult').classList.add('hidden');
+  $('cpuMemResult').innerHTML = '';
+  $('cpuMemStatus').classList.add('hidden');
+  $('cpuMemStatus').textContent = '';
+}
+
+// ─── Init ──────────────────────────────────
+resetTargetDbArea();
+resetResultArea();
+initThemeToggle();
+loadRepoStatus();
+</script>
+</body>
+</html>

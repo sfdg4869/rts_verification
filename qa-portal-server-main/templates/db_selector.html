@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DB 연결 설정 선택</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+        .content {
+            padding: 30px;
+        }
+        .section {
+            margin-bottom: 40px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 20px;
+        }
+        .section-title {
+            font-size: 20px;
+            font-weight: bold;
+            margin-bottom: 15px;
+            color: #333;
+            display: flex;
+            align-items: center;
+        }
+        .section-title.target {
+            color: #d32f2f;
+        }
+        .section-title.repo {
+            color: #1976d2;
+        }
+        .db-list {
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background: #fafafa;
+        }
+        .db-item {
+            padding: 12px 15px;
+            border-bottom: 1px solid #eee;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .db-item:hover {
+            background-color: #e3f2fd;
+        }
+        .db-item.selected {
+            background-color: #2196f3;
+            color: white;
+        }
+        .db-info {
+            flex: 1;
+        }
+        .db-name {
+            font-weight: bold;
+            font-size: 14px;
+        }
+        .db-details {
+            font-size: 12px;
+            color: #666;
+            margin-top: 4px;
+        }
+        .db-item.selected .db-details {
+            color: #e3f2fd;
+        }
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background-color: #4caf50;
+            margin-left: 10px;
+        }
+        .current-selection {
+            background: #e8f5e8;
+            border: 1px solid #4caf50;
+            border-radius: 4px;
+            padding: 10px;
+            margin-top: 15px;
+            font-size: 14px;
+        }
+        .apply-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            margin-top: 20px;
+            width: 100%;
+            transition: all 0.3s;
+        }
+        .apply-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        }
+        .apply-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+        .search-box {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+            margin-bottom: 10px;
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        .error {
+            background: #ffebee;
+            border: 1px solid #f44336;
+            color: #d32f2f;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+        .success {
+            background: #e8f5e8;
+            border: 1px solid #4caf50;
+            color: #2e7d32;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔧 Database 연결 설정 선택</h1>
+            <p>MongoDB에서 가져온 DB 설정 중 Target DB와 Repository DB를 선택하세요</p>
+        </div>
+        
+        <div class="content">
+            <div id="message-area"></div>
+            
+            <!-- Target DB 선택 섹션 -->
+            <div class="section">
+                <div class="section-title target">
+                    🎯 Target Database 선택
+                </div>
+                <input type="text" id="target-search" class="search-box" placeholder="호스트명이나 서비스명으로 검색...">
+                <div id="target-db-list" class="db-list">
+                    <div class="loading">Target DB 목록을 불러오는 중...</div>
+                </div>
+                <div id="target-selection" class="current-selection" style="display: none;">
+                    <strong>선택된 Target DB:</strong> <span id="target-selected-info"></span>
+                </div>
+            </div>
+            
+            <!-- Repository DB 선택 섹션 -->
+            <div class="section">
+                <div class="section-title repo">
+                    📊 Repository Database 선택
+                </div>
+                <input type="text" id="repo-search" class="search-box" placeholder="호스트명이나 서비스명으로 검색...">
+                <div id="repo-db-list" class="db-list">
+                    <div class="loading">Repository DB 목록을 불러오는 중...</div>
+                </div>
+                <div id="repo-selection" class="current-selection" style="display: none;">
+                    <strong>선택된 Repository DB:</strong> <span id="repo-selected-info"></span>
+                </div>
+            </div>
+            
+            <!-- 적용 버튼 -->
+            <button id="apply-settings" class="apply-btn" disabled>
+                설정 적용하기
+            </button>
+        </div>
+    </div>
+
+    <script>
+        let selectedTarget = null;
+        let selectedRepo = null;
+        let allDatabases = [];
+
+        // 페이지 로드시 초기화
+        document.addEventListener('DOMContentLoaded', function() {
+            loadDatabaseList();
+            setupSearchFilters();
+            setupApplyButton();
+        });
+
+        // DB 목록 로드
+        async function loadDatabaseList() {
+            try {
+                const response = await fetch('/rts/db-selector/available-dbs');
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    allDatabases = data.available_dbs || [];
+                    renderDatabaseLists();
+                    showMessage('success', `${allDatabases.length}개의 DB 설정을 불러왔습니다.`);
+                } else {
+                    throw new Error(data.message || 'DB 목록 로드 실패');
+                }
+            } catch (error) {
+                console.error('DB 목록 로드 오류:', error);
+                showMessage('error', `DB 목록을 불러오는데 실패했습니다: ${error.message}`);
+            }
+        }
+
+        // DB 목록 렌더링
+        function renderDatabaseLists(targetFilter = '', repoFilter = '') {
+            renderDatabaseList('target', targetFilter);
+            renderDatabaseList('repo', repoFilter);
+        }
+
+        // 개별 DB 목록 렌더링
+        function renderDatabaseList(type, filter = '') {
+            const listElement = document.getElementById(`${type}-db-list`);
+            const filteredDbs = allDatabases.filter(db => {
+                const searchText = `${db.host} ${db.service_name} ${db.username}`.toLowerCase();
+                return searchText.includes(filter.toLowerCase());
+            });
+
+            if (filteredDbs.length === 0) {
+                listElement.innerHTML = '<div class="loading">일치하는 DB 설정이 없습니다.</div>';
+                return;
+            }
+
+            listElement.innerHTML = filteredDbs.map(db => `
+                <div class="db-item" data-config-id="${db.config_id}" data-type="${type}">
+                    <div class="db-info">
+                        <div class="db-name">${db.host}:${db.port}</div>
+                        <div class="db-details">서비스: ${db.service_name || 'N/A'} | 사용자: ${db.username || 'N/A'}</div>
+                    </div>
+                    <div class="status-indicator"></div>
+                </div>
+            `).join('');
+
+            // 클릭 이벤트 추가
+            listElement.querySelectorAll('.db-item').forEach(item => {
+                item.addEventListener('click', function() {
+                    selectDatabase(type, db.config_id, this);
+                });
+            });
+        }
+
+        // DB 선택
+        function selectDatabase(type, configId) {
+            const selectedDb = allDatabases.find(db => db.config_id === configId);
+            if (!selectedDb) return;
+
+            // 이전 선택 해제
+            document.querySelectorAll(`#${type}-db-list .db-item`).forEach(item => {
+                item.classList.remove('selected');
+            });
+
+            // 새 선택 적용
+            document.querySelector(`#${type}-db-list .db-item[data-config-id="${configId}"]`).classList.add('selected');
+
+            if (type === 'target') {
+                selectedTarget = selectedDb;
+                document.getElementById('target-selected-info').textContent = 
+                    `${selectedDb.host}:${selectedDb.port} (${selectedDb.service_name})`;
+                document.getElementById('target-selection').style.display = 'block';
+            } else {
+                selectedRepo = selectedDb;
+                document.getElementById('repo-selected-info').textContent = 
+                    `${selectedDb.host}:${selectedDb.port} (${selectedDb.service_name})`;
+                document.getElementById('repo-selection').style.display = 'block';
+            }
+
+            updateApplyButton();
+        }
+
+        // 검색 필터 설정
+        function setupSearchFilters() {
+            document.getElementById('target-search').addEventListener('input', function() {
+                renderDatabaseList('target', this.value);
+            });
+
+            document.getElementById('repo-search').addEventListener('input', function() {
+                renderDatabaseList('repo', this.value);
+            });
+        }
+
+        // 적용 버튼 설정
+        function setupApplyButton() {
+            document.getElementById('apply-settings').addEventListener('click', applySettings);
+        }
+
+        // 적용 버튼 상태 업데이트
+        function updateApplyButton() {
+            const applyBtn = document.getElementById('apply-settings');
+            applyBtn.disabled = !selectedTarget || !selectedRepo;
+        }
+
+        // 설정 적용
+        async function applySettings() {
+            if (!selectedTarget || !selectedRepo) {
+                showMessage('error', 'Target DB와 Repository DB를 모두 선택해주세요.');
+                return;
+            }
+
+            try {
+                // Target DB 설정
+                const targetResponse = await fetch('/rts/db-selector/select-target', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ config_id: selectedTarget.config_id })
+                });
+
+                const targetResult = await targetResponse.json();
+                if (targetResult.status !== 'success') {
+                    throw new Error(`Target DB 설정 실패: ${targetResult.message}`);
+                }
+
+                // Repository DB 설정
+                const repoResponse = await fetch('/rts/db-selector/select-repo', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ config_id: selectedRepo.config_id })
+                });
+
+                const repoResult = await repoResponse.json();
+                if (repoResult.status !== 'success') {
+                    throw new Error(`Repository DB 설정 실패: ${repoResult.message}`);
+                }
+
+                showMessage('success', '✅ DB 연결 설정이 성공적으로 적용되었습니다!');
+                
+            } catch (error) {
+                console.error('설정 적용 오류:', error);
+                showMessage('error', `설정 적용에 실패했습니다: ${error.message}`);
+            }
+        }
+
+        // 메시지 표시
+        function showMessage(type, message) {
+            const messageArea = document.getElementById('message-area');
+            messageArea.innerHTML = `<div class="${type}">${message}</div>`;
+            
+            // 5초 후 메시지 제거
+            setTimeout(() => {
+                messageArea.innerHTML = '';
+            }, 5000);
+        }
+    </script>
+</body>
+</html>

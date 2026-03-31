@@ -1,0 +1,13 @@
+{
+  "data": [
+    {
+      "line": {
+        "color": "#1f77b4"
+      },
+      "marker": {
+        "size": 4
+      },
+      "mode": "lines+markers",
+      "name": "Target - session logical reads",
+      "x": [
+        

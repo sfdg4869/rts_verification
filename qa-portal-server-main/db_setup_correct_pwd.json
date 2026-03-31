@@ -1,0 +1,16 @@
+{
+  "target_db": {
+    "host": "10.20.132.101",
+    "port": 1521,
+    "service": "orcl",
+    "user": "maxgauge",
+    "password": "maxgauge"
+  },
+  "repo_db": {
+    "host": "10.20.132.40", 
+    "port": 1521,
+    "service": "orcl",
+    "user": "C##TEST_2507",
+    "password": "TEST_2507"
+  }
+}

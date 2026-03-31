@@ -1,0 +1,24 @@
+{
+  "target_db": {
+    "host": "10.20.132.101",
+    "port": 1521,
+    "service": "oracle19",
+    "user": "maxgauge",
+    "password": "maxgauge"
+  },
+  "repo_db": {
+    "host": "10.20.132.40",
+    "port": 1521,
+    "service": "orcl",
+    "user": "C##TEST_2507",
+    "password": "TEST_2507"
+  },
+  "_repo_db_pg_disabled": {
+    "host": "10.10.47.102",
+    "port": 5433,
+    "database": "252Q_REPO",
+    "user": "postgres",
+    "password": "postgres",
+    "db_type": "postgresql"
+  }
+}

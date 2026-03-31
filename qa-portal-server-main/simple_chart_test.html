@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>간단 DB 차트 테스트</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        .result {
+            margin-top: 20px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 10px;
+        }
+        .error {
+            color: red;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔷 간단 DB 차트 테스트</h1>
+        
+        <div>
+            <button onclick="testConnection()">📡 API 연결 테스트</button>
+            <button onclick="generateChart()">📊 차트 생성 (30초 소요)</button>
+            <button onclick="generateSampleChart()">🎨 샘플 차트 생성</button>
+        </div>
+        
+        <div id="status" style="margin-top: 20px; color: #666;"></div>
+        <div id="result" class="result" style="display: none;"></div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:5000';
+        
+        function updateStatus(message, isError = false) {
+            const status = document.getElementById('status');
+            status.textContent = message;
+            status.className = isError ? 'error' : '';
+        }
+        
+        async function testConnection() {
+            updateStatus('📡 API 연결을 테스트하고 있습니다...');
+            
+            try {
+                const response = await fetch(`${API_BASE}/rts/data/list`);
+                if (response.ok) {
+                    updateStatus('✅ API 연결 성공! 차트 생성이 가능합니다.');
+                } else {
+                    updateStatus('❌ API 연결 실패. Flask 앱이 실행 중인지 확인하세요.', true);
+                }
+            } catch (error) {
+                updateStatus('❌ 연결 오류: ' + error.message, true);
+            }
+        }
+        
+        async function generateChart() {
+            updateStatus('📊 30초간 데이터를 수집하고 차트를 생성하고 있습니다...');
+            document.getElementById('result').style.display = 'none';
+            
+            try {
+                const response = await fetch(`${API_BASE}/rts/chart/compare_with_chart?db_id=1&chart_type=plotly&metrics=session logical reads,total sessions`);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                
+                updateStatus('✅ 차트 생성 완료!');
+                
+                // 결과 표시
+                const resultDiv = document.getElementById('result');
+                resultDiv.innerHTML = `
+                    <h3>📈 수집 결과</h3>
+                    <p><strong>수집 시간:</strong> ${data.summary.collection_duration}</p>
+                    <p><strong>Target DB 성공:</strong> ${data.summary.target_success_count}회</p>
+                    <p><strong>Repo DB 성공:</strong> ${data.summary.repo_success_count}회</p>
+                    <div style="margin-top: 20px;">
+                        ${data.chart_data.html}
+                    </div>
+                `;
+                resultDiv.style.display = 'block';
+                
+            } catch (error) {
+                updateStatus('❌ 차트 생성 실패: ' + error.message, true);
+            }
+        }
+        
+        function generateSampleChart() {
+            updateStatus('🎨 샘플 차트를 생성하고 있습니다...');
+            
+            // Plotly를 사용한 샘플 차트
+            const sampleData = {
+                x: ['13:00:01', '13:00:02', '13:00:03', '13:00:04', '13:00:05'],
+                target: [1000, 1050, 980, 1120, 1080],
+                repo: [995, 1045, 985, 1115, 1075]
+            };
+            
+            const resultDiv = document.getElementById('result');
+            resultDiv.innerHTML = `
+                <h3>🎨 샘플 차트</h3>
+                <div id="sampleChart" style="width:100%;height:400px;"></div>
+                <script src="https://cdn.plot.ly/plotly-latest.min.js"><\/script>
+                <script>
+                    const trace1 = {
+                        x: ${JSON.stringify(sampleData.x)},
+                        y: ${JSON.stringify(sampleData.target)},
+                        mode: 'lines+markers',
+                        name: 'Target DB',
+                        line: {color: '#1f77b4'}
+                    };
+                    
+                    const trace2 = {
+                        x: ${JSON.stringify(sampleData.x)},
+                        y: ${JSON.stringify(sampleData.repo)},
+                        mode: 'lines+markers',
+                        name: 'Repo DB',
+                        line: {color: '#ff7f0e', dash: 'dash'}
+                    };
+                    
+                    const layout = {
+                        title: 'DB 성능 지표 비교 (샘플)',
+                        xaxis: {title: '시간'},
+                        yaxis: {title: '값'}
+                    };
+                    
+                    Plotly.newPlot('sampleChart', [trace1, trace2], layout);
+                <\/script>
+            `;
+            resultDiv.style.display = 'block';
+            updateStatus('✅ 샘플 차트 생성 완료!');
+        }
+    </script>
+</body>
+</html>

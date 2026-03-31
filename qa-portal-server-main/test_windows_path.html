@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Windows 경로 테스트</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .container { max-width: 800px; margin: 0 auto; }
+        .form-group { margin: 10px 0; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input, textarea { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
+        button { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; }
+        button:hover { background: #0056b3; }
+        .result { margin-top: 20px; padding: 10px; border: 1px solid #ddd; border-radius: 4px; }
+        .success { background: #d4edda; border-color: #c3e6cb; }
+        .error { background: #f8d7da; border-color: #f5c6cb; }
+        .info { background: #e2e3e5; border-color: #d6d8db; }
+        .path-examples { background: #f8f9fa; padding: 15px; border-radius: 4px; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>sec_logging.json 생성 테스트</h1>
+        
+        <div class="path-examples">
+            <h3>💡 Windows 경로 입력 방법</h3>
+            <p><strong>방법 1 (권장):</strong> <code>C:/Users/jungkyungsoo/Desktop/jks/OJT_2</code></p>
+            <p><strong>방법 2:</strong> <code>C:\\Users\\jungkyungsoo\\Desktop\\jks\\OJT_2</code></p>
+            <p><strong>주의:</strong> 단일 백슬래시(\)는 JSON에서 이스케이프 문자로 처리되어 오류가 발생합니다.</p>
+        </div>
+
+        <form id="testForm">
+            <div class="form-group">
+                <label for="dg_home_dir">경로 (dg_home_dir):</label>
+                <input type="text" id="dg_home_dir" name="dg_home_dir" 
+                       value="C:/Users/jungkyungsoo/Desktop/jks/OJT_2" 
+                       placeholder="C:/path/to/directory">
+            </div>
+
+            <div class="form-group">
+                <label for="db_id">Database ID:</label>
+                <input type="number" id="db_id" name="db_id" value="2">
+            </div>
+
+            <div class="form-group">
+                <label for="local_only">
+                    <input type="checkbox" id="local_only" name="local_only" checked>
+                    로컬에만 파일 생성 (SSH 사용 안함)
+                </label>
+            </div>
+
+            <div class="form-group">
+                <label for="ssh_host">SSH Host:</label>
+                <input type="text" id="ssh_host" name="ssh_host" value="10.20.132.40">
+            </div>
+
+            <div class="form-group">
+                <label for="ssh_port">SSH Port:</label>
+                <input type="number" id="ssh_port" name="ssh_port" value="22" placeholder="22">
+            </div>
+
+            <div class="form-group">
+                <label for="ssh_user">SSH User:</label>
+                <input type="text" id="ssh_user" name="ssh_user" value="jungkyungsoo">
+            </div>
+
+            <div class="form-group">
+                <label for="ssh_password">SSH Password:</label>
+                <input type="password" id="ssh_password" name="ssh_password" value="!977255Ks">
+            </div>
+
+            <button type="button" onclick="testPath()">경로 유효성 검사</button>
+            <button type="button" onclick="testSSH()">SSH 연결 테스트</button>
+            <button type="button" onclick="previewJson()">JSON 미리보기</button>
+            <button type="button" onclick="createJson()">JSON 파일 생성</button>
+        </form>
+
+        <div id="result" class="result" style="display: none;"></div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:5000/repo';
+
+        function showResult(message, type = 'info') {
+            const resultDiv = document.getElementById('result');
+            resultDiv.className = `result ${type}`;
+            resultDiv.innerHTML = message;
+            resultDiv.style.display = 'block';
+        }
+
+        function getFormData() {
+            const localOnly = document.getElementById('local_only').checked;
+            const data = {
+                dg_home_dir: document.getElementById('dg_home_dir').value,
+                db_id: parseInt(document.getElementById('db_id').value),
+                local_only: localOnly
+            };
+            
+            // SSH 정보는 local_only가 false일 때만 포함
+            if (!localOnly) {
+                data.ssh_host = document.getElementById('ssh_host').value;
+                data.ssh_port = parseInt(document.getElementById('ssh_port').value) || 22;
+                data.ssh_user = document.getElementById('ssh_user').value;
+                data.ssh_password = document.getElementById('ssh_password').value;
+            }
+            
+            return data;
+        }
+
+        function testPath() {
+            const data = getFormData();
+            const originalPath = data.dg_home_dir;
+            
+            let message = '<h4>🔍 경로 유효성 검사</h4>';
+            message += `<p><strong>원본 경로:</strong> ${originalPath}</p>`;
+            
+            // JSON 직렬화 테스트
+            try {
+                const jsonStr = JSON.stringify(data, null, 2);
+                const parsed = JSON.parse(jsonStr);
+                
+                message += `<p><strong>JSON 직렬화:</strong> ✅ 성공</p>`;
+                message += `<p><strong>파싱된 경로:</strong> ${parsed.dg_home_dir}</p>`;
+                
+                // 정규화된 경로
+                const normalized = originalPath.replace(/\\\\/g, '/');
+                message += `<p><strong>정규화된 경로:</strong> ${normalized}</p>`;
+                
+                message += '<h5>📋 JSON 페이로드:</h5>';
+                message += `<pre>${jsonStr}</pre>`;
+                
+                showResult(message, 'success');
+            } catch (e) {
+                message += `<p><strong>JSON 직렬화:</strong> ❌ 실패</p>`;
+                message += `<p><strong>오류:</strong> ${e.message}</p>`;
+                showResult(message, 'error');
+            }
+        }
+
+        async function testSSH() {
+            const data = getFormData();
+            const sshData = {
+                ssh_host: data.ssh_host,
+                ssh_port: data.ssh_port,
+                ssh_user: data.ssh_user,
+                ssh_password: data.ssh_password
+            };
+            
+            try {
+                showResult('🔄 SSH 연결 테스트 중...', 'info');
+                
+                const response = await fetch(`${API_BASE}/test_ssh_connection`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(sshData)
+                });
+
+                const result = await response.json();
+                
+                if (response.ok) {
+                    let message = '<h4>✅ SSH 연결 성공</h4>';
+                    message += `<p><strong>호스트:</strong> ${result.ssh_host}:${result.ssh_port}</p>`;
+                    message += `<p><strong>연결 시간:</strong> ${result.connection_time}</p>`;
+                    message += `<p><strong>테스트 결과:</strong> ${result.test_output}</p>`;
+                    showResult(message, 'success');
+                } else {
+                    let message = '<h4>❌ SSH 연결 실패</h4>';
+                    message += `<p><strong>오류:</strong> ${result.error}</p>`;
+                    message += `<p><strong>제안:</strong> ${result.suggestion}</p>`;
+                    showResult(message, 'error');
+                }
+            } catch (e) {
+                showResult(`❌ 요청 오류: ${e.message}`, 'error');
+            }
+        }
+
+        async function previewJson() {
+            const data = { db_id: getFormData().db_id };
+            
+            try {
+                showResult('🔄 미리보기 요청 중...', 'info');
+                
+                const response = await fetch(`${API_BASE}/preview_sec_logging_json`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+                
+                if (response.ok) {
+                    let message = '<h4>✅ JSON 미리보기 성공</h4>';
+                    message += `<p><strong>Stat 개수:</strong> ${result.stat_details?.length || 0}</p>`;
+                    message += `<p><strong>Wait 개수:</strong> ${result.wait_details?.length || 0}</p>`;
+                    message += '<h5>📋 생성될 JSON 구조:</h5>';
+                    message += `<pre>${JSON.stringify(result.preview, null, 2)}</pre>`;
+                    showResult(message, 'success');
+                } else {
+                    showResult(`❌ 미리보기 실패: ${result.error}`, 'error');
+                }
+            } catch (e) {
+                showResult(`❌ 요청 오류: ${e.message}`, 'error');
+            }
+        }
+
+        async function createJson() {
+            const data = getFormData();
+            
+            try {
+                showResult('🔄 JSON 파일 생성 중...', 'info');
+                
+                const response = await fetch(`${API_BASE}/create_sec_logging_json`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+                
+                if (response.ok) {
+                    let message = '<h4>✅ JSON 파일 생성 성공</h4>';
+                    message += `<p><strong>결과:</strong> ${result.result}</p>`;
+                    message += `<p><strong>파일 경로:</strong> ${result.file_path}</p>`;
+                    message += `<p><strong>생성 방식:</strong> ${result.local_only ? '로컬 생성' : 'SSH 원격 생성'}</p>`;
+                    
+                    if (!result.local_only) {
+                        message += `<p><strong>SSH 호스트:</strong> ${result.ssh_host}:${result.ssh_port}</p>`;
+                    }
+                    
+                    message += `<p><strong>Stat 개수:</strong> ${result.stat_count}</p>`;
+                    message += `<p><strong>Wait 개수:</strong> ${result.wait_count}</p>`;
+                    showResult(message, 'success');
+                } else {
+                    showResult(`❌ 생성 실패: ${result.error}`, 'error');
+                }
+            } catch (e) {
+                showResult(`❌ 요청 오류: ${e.message}`, 'error');
+            }
+        }
+
+        // 페이지 로드 시 자동 경로 테스트
+        window.onload = function() {
+            testPath();
+        };
+    </script>
+</body>
+</html>

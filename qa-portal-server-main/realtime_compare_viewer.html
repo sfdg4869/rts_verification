@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🔄 실시간 DB 비교 모니터링</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            padding: 30px;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .header h1 {
+            color: #4a5568;
+            margin: 0;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
+        }
+        .controls {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+            align-items: center;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .form-group label {
+            font-weight: bold;
+            margin-bottom: 5px;
+            color: #4a5568;
+        }
+        .form-group input, .form-group select {
+            padding: 8px 12px;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 14px;
+            text-align: center;
+        }
+        .btn {
+            background: linear-gradient(135deg, #4299e1 0%, #3182ce 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 16px;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(66, 153, 225, 0.4);
+        }
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(66, 153, 225, 0.6);
+        }
+        .btn:disabled {
+            background: #a0aec0;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+        .status {
+            background: #f7fafc;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-left: 5px solid #4299e1;
+        }
+        .status h3 {
+            margin: 0 0 10px 0;
+            color: #2d3748;
+        }
+        .progress-info {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .info-card {
+            background: white;
+            border-radius: 10px;
+            padding: 15px;
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            border-top: 4px solid #4299e1;
+        }
+        .info-card .value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #4299e1;
+            margin: 10px 0;
+        }
+        .info-card .label {
+            color: #718096;
+            font-size: 0.9em;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .data-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        .data-section {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .data-section h4 {
+            margin: 0 0 15px 0;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #e2e8f0;
+            color: #2d3748;
+        }
+        .data-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #f1f5f9;
+        }
+        .data-item:last-child {
+            border-bottom: none;
+        }
+        .comparison-section {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            max-height: 500px;
+            overflow-y: auto;
+        }
+        .comparison-item {
+            display: grid;
+            grid-template-columns: 2fr 1fr 1fr 1fr 80px;
+            gap: 10px;
+            padding: 10px;
+            margin-bottom: 5px;
+            border-radius: 5px;
+            background: #f8fafc;
+            align-items: center;
+        }
+        .comparison-item.consistent {
+            background: #f0fff4;
+            border-left: 4px solid #38a169;
+        }
+        .comparison-item.inconsistent {
+            background: #fef5e7;
+            border-left: 4px solid #ed8936;
+        }
+        .status-badge {
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 0.8em;
+            font-weight: bold;
+            text-align: center;
+        }
+        .badge-success {
+            background: #c6f6d5;
+            color: #22543d;
+        }
+        .badge-warning {
+            background: #feebc8;
+            color: #744210;
+        }
+        .log {
+            background: #1a202c;
+            color: #e2e8f0;
+            border-radius: 10px;
+            padding: 20px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            margin-top: 20px;
+        }
+        .log-entry {
+            margin-bottom: 5px;
+            padding: 5px;
+            border-radius: 3px;
+        }
+        .log-info { background: rgba(66, 153, 225, 0.2); }
+        .log-success { background: rgba(56, 161, 105, 0.2); }
+        .log-error { background: rgba(245, 101, 101, 0.2); }
+        .log-warning { background: rgba(237, 137, 54, 0.2); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔄 실시간 DB 비교 모니터링</h1>
+            <p>Target DB와 Repo DB의 실시간 데이터 비교 스트리밍</p>
+        </div>
+
+        <div class="controls">
+            <div class="form-group">
+                <label for="dbId">DB ID</label>
+                <input type="number" id="dbId" value="2" min="1">
+            </div>
+            <div class="form-group">
+                <label for="threshold">허용 오차</label>
+                <input type="number" id="threshold" value="10" min="0">
+            </div>
+            <div class="form-group">
+                <label for="interval">조회 간격(초)</label>
+                <input type="number" id="interval" value="1" min="1" max="10">
+            </div>
+            <button id="startBtn" class="btn" onclick="startMonitoring()">
+                🚀 모니터링 시작
+            </button>
+            <button id="stopBtn" class="btn" onclick="stopMonitoring()" disabled>
+                ⏹️ 중지
+            </button>
+        </div>
+
+        <div class="status" id="statusSection" style="display: none;">
+            <h3 id="statusTitle">대기 중...</h3>
+            <div class="progress-info">
+                <div class="info-card">
+                    <div class="value" id="currentSeq">0</div>
+                    <div class="label">현재 수집</div>
+                </div>
+                <div class="info-card">
+                    <div class="value" id="successCount">0</div>
+                    <div class="label">성공</div>
+                </div>
+                <div class="info-card">
+                    <div class="value" id="errorCount">0</div>
+                    <div class="label">오류</div>
+                </div>
+                <div class="info-card">
+                    <div class="value" id="elapsedTime">0s</div>
+                    <div class="label">경과 시간</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="data-container" id="dataContainer" style="display: none;">
+            <div class="data-section">
+                <h4>🎯 Target DB 데이터</h4>
+                <div id="targetData"></div>
+            </div>
+            <div class="data-section">
+                <h4>🗄️ Repo DB 데이터</h4>
+                <div id="repoData"></div>
+            </div>
+        </div>
+
+        <div class="comparison-section" id="comparisonSection" style="display: none;">
+            <h4>📊 실시간 비교 결과</h4>
+            <div style="display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 80px; gap: 10px; padding: 10px; background: #e2e8f0; border-radius: 5px; font-weight: bold; margin-bottom: 10px;">
+                <div>지표명</div>
+                <div>Target 값</div>
+                <div>Repo 값</div>
+                <div>차이</div>
+                <div>일치</div>
+            </div>
+            <div id="comparisonData"></div>
+        </div>
+
+        <div class="log" id="logContainer">
+            <strong>📋 실시간 로그</strong>
+            <div id="logEntries"></div>
+        </div>
+        <div class="data-section" id="rawPayloadSection" style="display:none; margin-top:20px;">
+            <h4>🧾 Raw SSE Payload (디버그)</h4>
+            <pre id="rawPayload" style="background:#f7fafc;padding:12px;border-radius:8px;max-height:200px;overflow:auto;font-size:12px"></pre>
+        </div>
+    </div>
+
+    <script>
+        let eventSource = null;
+        let startTime = null;
+
+        function addLog(message, type = 'info') {
+            const logEntries = document.getElementById('logEntries');
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = document.createElement('div');
+            logEntry.className = `log-entry log-${type}`;
+            logEntry.innerHTML = `[${timestamp}] ${message}`;
+            logEntries.appendChild(logEntry);
+            logEntries.scrollTop = logEntries.scrollHeight;
+        }
+
+        function updateProgressInfo(data) {
+            if (data.seq) document.getElementById('currentSeq').textContent = `${data.seq}/30`;
+            if (data.collection_stats) {
+                document.getElementById('successCount').textContent = data.collection_stats.success;
+                document.getElementById('errorCount').textContent = data.collection_stats.error;
+            }
+            if (startTime) {
+                const elapsed = Math.floor((Date.now() - startTime) / 1000);
+                document.getElementById('elapsedTime').textContent = `${elapsed}s`;
+            }
+        }
+
+        // Normalize data objects from server to have NAME and SIGMA_VALUE properties
+        function normalizeDataArray(arr) {
+            if (!arr || !Array.isArray(arr)) return [];
+            return arr.map(item => {
+                const name = item.NAME ?? item.name ?? item.stat_name ?? item.event_name ?? '';
+                const value = item.SIGMA_VALUE ?? item.sigma_value ?? item.sigma_wait_time ?? item.value ?? item.sigma_value;
+                return { NAME: name, SIGMA_VALUE: value };
+            });
+        }
+
+        function normalizeComparison(arr) {
+            if (!arr || !Array.isArray(arr)) return [];
+            return arr.map(comp => {
+                // comp items may already be normalized; ensure fields exist
+                return {
+                    name: comp.name ?? comp.NAME ?? '',
+                    target_value: comp.target_value ?? comp.targetValue ?? null,
+                    repo_value: comp.repo_value ?? comp.repoValue ?? null,
+                    diff: (comp.diff === null || comp.diff === undefined) ? 0 : comp.diff,
+                    consistent: comp.consistent ?? false
+                };
+            });
+        }
+
+        function displayData(targetData, repoData) {
+            // Target 데이터 표시
+            const targetContainer = document.getElementById('targetData');
+            targetContainer.innerHTML = '';
+            if (targetData && targetData.length > 0) {
+                targetData.forEach(item => {
+                    const name = item.NAME ?? '';
+                    const val = item.SIGMA_VALUE ?? item.sigma_value ?? item.value ?? 'N/A';
+                    const div = document.createElement('div');
+                    div.className = 'data-item';
+                    div.innerHTML = `<span>${name}</span><span><strong>${val}</strong></span>`;
+                    targetContainer.appendChild(div);
+                });
+            }
+
+            // Repo 데이터 표시
+            const repoContainer = document.getElementById('repoData');
+            repoContainer.innerHTML = '';
+            if (repoData && repoData.length > 0) {
+                repoData.forEach(item => {
+                    const name = item.NAME ?? '';
+                    const val = item.SIGMA_VALUE ?? item.sigma_value ?? item.value ?? 'N/A';
+                    const div = document.createElement('div');
+                    div.className = 'data-item';
+                    div.innerHTML = `<span>${name}</span><span><strong>${val}</strong></span>`;
+                    repoContainer.appendChild(div);
+                });
+            }
+        }
+
+        function displayComparison(comparisons) {
+            const comparisonContainer = document.getElementById('comparisonData');
+            comparisonContainer.innerHTML = '';
+            
+            if (comparisons && comparisons.length > 0) {
+                comparisons.forEach(comp => {
+                    const diffVal = (comp.diff === null || comp.diff === undefined) ? 0 : comp.diff;
+                    const div = document.createElement('div');
+                    div.className = `comparison-item ${comp.consistent ? 'consistent' : 'inconsistent'}`;
+                    div.innerHTML = `
+                        <div>${comp.name}</div>
+                        <div>${comp.target_value ?? 'N/A'}</div>
+                        <div>${comp.repo_value ?? 'N/A'}</div>
+                        <div>${typeof diffVal === 'number' ? diffVal.toFixed(2) : diffVal}</div>
+                        <div><span class="status-badge ${comp.consistent ? 'badge-success' : 'badge-warning'}">${comp.consistent ? '✓' : '✗'}</span></div>
+                    `;
+                    comparisonContainer.appendChild(div);
+                });
+            }
+        }
+
+        function startMonitoring() {
+            const dbId = document.getElementById('dbId').value;
+            const threshold = document.getElementById('threshold').value;
+            const interval = document.getElementById('interval').value;
+
+            if (!dbId) {
+                alert('DB ID를 입력하세요.');
+                return;
+            }
+
+            // UI 상태 변경
+            document.getElementById('startBtn').disabled = true;
+            document.getElementById('stopBtn').disabled = false;
+            document.getElementById('statusSection').style.display = 'block';
+            document.getElementById('dataContainer').style.display = 'grid';
+            document.getElementById('comparisonSection').style.display = 'block';
+            document.getElementById('statusTitle').textContent = '모니터링 진행 중...';
+
+            // 로그 초기화
+            document.getElementById('logEntries').innerHTML = '';
+            startTime = Date.now();
+
+            // SSE 연결
+            const url = `/rts/compare/stream?db_id=${dbId}&threshold=${threshold}&interval=${interval}`;
+            eventSource = new EventSource(url);
+
+            eventSource.onmessage = function(event) {
+                    try {
+                        // 전체 페이로드를 콘솔과 UI에 노출(디버그용)
+                        console.debug('SSE event.data:', event.data);
+                        const data = JSON.parse(event.data);
+                        document.getElementById('rawPayload').textContent = JSON.stringify(data, null, 2);
+                        document.getElementById('rawPayloadSection').style.display = 'block';
+
+                        switch(data.type) {
+                        case 'start':
+                            addLog(`✅ ${data.message}`, 'success');
+                            break;
+                            
+                        case 'progress':
+                            updateProgressInfo(data);
+                            // displayData: normalize keys for NAME/name and SIGMA_VALUE/sigma_value
+                            displayData(normalizeDataArray(data.target_data), normalizeDataArray(data.repo_data));
+                            displayComparison(normalizeComparison(data.comparison));
+                            addLog(`📊 수집 ${data.seq}/30 완료 (${data.elapsed_time})`, 'info');
+                            break;
+                            
+                        case 'error':
+                            addLog(`❌ 오류 (수집 ${data.seq}): ${data.error}`, 'error');
+                            break;
+                            
+                        case 'complete':
+                            addLog(`🎉 ${data.message} - 성공률: ${data.success_rate}`, 'success');
+                            document.getElementById('statusTitle').textContent = '모니터링 완료';
+                            stopMonitoring();
+                            break;
+                    }
+                } catch (e) {
+                    console.error('JSON 파싱 오류:', e);
+                    addLog(`❌ 데이터 파싱 오류: ${e.message}`, 'error');
+                }
+            };
+
+            eventSource.onerror = function(event) {
+                addLog('❌ 연결 오류가 발생했습니다.', 'error');
+                stopMonitoring();
+            };
+
+            addLog(`🚀 실시간 모니터링 시작 (DB ID: ${dbId})`, 'info');
+        }
+
+        function stopMonitoring() {
+            if (eventSource) {
+                eventSource.close();
+                eventSource = null;
+            }
+            
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('stopBtn').disabled = true;
+            
+            if (document.getElementById('statusTitle').textContent !== '모니터링 완료') {
+                document.getElementById('statusTitle').textContent = '모니터링 중지됨';
+                addLog('⏹️ 모니터링이 중지되었습니다.', 'warning');
+            }
+        }
+
+        // 페이지 언로드 시 연결 정리
+        window.addEventListener('beforeunload', function() {
+            if (eventSource) {
+                eventSource.close();
+            }
+        });
+    </script>
+</body>
+</html>
