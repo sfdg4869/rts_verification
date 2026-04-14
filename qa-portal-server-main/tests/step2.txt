@@ -1,0 +1,59 @@
+-- Case1 에서 사용할 프로시저 생성 (한번 수행될 때 3초 동안 도는 프로시저)
+CREATE OR REPLACE PROCEDURE qs_sql_test_proc1 as 
+    v_start TIMESTAMP; 
+BEGIN
+    v_start := SYSTIMESTAMP;
+           
+    -- qs_sql_test_proc1 Elapsed Time 3 seconds
+    WHILE (SYSTIMESTAMP - v_start) < INTERVAL '3' SECOND LOOP
+            NULL;
+    END LOOP;
+END;
+
+-- Case2 에서 사용할 프로시저 생성 (한번 수행될 때 1초 동안 도는 프로시저)
+CREATE OR REPLACE PROCEDURE qs_sql_test_proc2 as 
+    v_start TIMESTAMP; 
+BEGIN
+    v_start := SYSTIMESTAMP;
+        
+    -- qs_sql_test_proc2 Elapsed Time 1 seconds
+    WHILE (SYSTIMESTAMP - v_start) < INTERVAL '1' SECOND LOOP
+            NULL;
+    END LOOP;
+END;
+
+-- Case3 에서 사용할 프로시저 생성 (한번 수행될 때 0.05초 동안 도는 프로시저)
+CREATE OR REPLACE PROCEDURE qs_sql_test_proc3 as 
+    v_start TIMESTAMP; 
+BEGIN
+    v_start := SYSTIMESTAMP;
+        
+    -- qs_sql_test_proc3 Elapsed Time 0.05 seconds
+    WHILE (SYSTIMESTAMP - v_start) < INTERVAL '0.05' SECOND LOOP
+            NULL;
+    END LOOP;
+END;
+
+-- Case4 에서 사용할 프로시저 생성 (한번 수행될 때 0.01초 동안 도는 프로시저)
+CREATE OR REPLACE PROCEDURE qs_sql_test_proc4 as 
+    v_start TIMESTAMP; 
+BEGIN
+    v_start := SYSTIMESTAMP;
+           
+    -- qs_sql_test_proc4 Elapsed Time 0.01 seconds
+    WHILE (SYSTIMESTAMP - v_start) < INTERVAL '0.01' SECOND LOOP
+            NULL;
+    END LOOP;
+END;
+
+-- Case5 에서 사용할 프로시저 생성 (한번 수행될 때 0.001초 동안 도는 프로시저)
+CREATE OR REPLACE PROCEDURE qs_sql_test_proc5 as 
+    v_start TIMESTAMP; 
+BEGIN
+    v_start := SYSTIMESTAMP;
+        
+    -- qs_sql_test_proc5 Elapsed Time 0.001 seconds
+    WHILE (SYSTIMESTAMP - v_start) < INTERVAL '0.001' SECOND LOOP
+            NULL;
+    END LOOP;
+END;

@@ -1,0 +1,39 @@
+-- 쿼리 Bind 변수 ${db_id_list} 입력 형식 : 567, 569
+-- 쿼리 Bind 변수 ${partition_date} 입력 형식 : 250227 형식으로 입력
+-- 쿼리 Bind 변수 ${logging_time} 입력 형식 : 2025-02-27 15:30:00 형식으로 입력
+
+-- ORA_SQL_ELAPSE 수집 결과 조회
+SELECT a.db_id, b.instance_name, 
+        a.sql_id, 
+        a.sql_hash, 
+        a.sql_addr, 
+        a.sql_plan_hash,
+        count(*) AS execution_count,
+        sum(a.ELAPSE)/1000 AS total_elapse_sec,
+        (sum(a.ELAPSE)/count(*))/1000 AS per_elapse_ms_to_sec -- ora_sql_elapse elapse unit : milliseconds (1 second = 1,000 milliseconds)
+FROM ora_sql_elapse a, apm_db_info b
+WHERE a.db_id = b.db_id AND a.db_id IN (${db_id_list}) AND a.partition_key > TO_NUMBER('${partition_date}' || '000') AND a.time >= TO_TIMESTAMP('${logging_time}', 'YYYY-MM-DD HH24:MI:SS')
+AND a.sql_id in ('fbf2t9pw12ynm', 'ga6tfrmnrzwax', 'af5w9c5uq9mf5', '9yv10yjy19dva', '9t1uh0g3vjnd7')
+GROUP BY a.db_id, b.instance_name,
+        a.sql_id,
+        a.sql_hash,
+        a.sql_addr,
+        a.sql_plan_hash
+ORDER BY a.db_id, decode(a.sql_id, 'fbf2t9pw12ynm', 1, 'ga6tfrmnrzwax', 2, 'af5w9c5uq9mf5', 3, '9yv10yjy19dva', 4, '9t1uh0g3vjnd7', 5), a.sql_plan_hash;
+
+-- ORA_SQL_STAT_10MIN 수집 결과 조회
+SELECT a.db_id, b.instance_name, 
+        a.time, 
+        a.sql_id, 
+        a.sql_hash, 
+        a.sql_addr, 
+        a.sql_plan_hash,
+        a.execution_count,
+        (a.elapsed_time/100) AS elapse_cs_to_sec, -- ora_sql_stat_10min elapsed_time unit : centiseconds (1 second = 100 centiseconds)
+        CASE WHEN a.EXECUTION_COUNT < 1 THEN NULL 
+                   ELSE ((a.elapsed_time/a.execution_count)/100)
+        END AS per_elapse_sec
+FROM ora_sql_stat_10min a, apm_db_info b 
+WHERE a.db_id = b.db_id AND a.db_id IN (${db_id_list}) AND a.partition_key > TO_NUMBER('${partition_date}' || '000') AND a.time >= TO_TIMESTAMP('${logging_time}', 'YYYY-MM-DD HH24:MI:SS')
+AND a.sql_id in ('fbf2t9pw12ynm', 'ga6tfrmnrzwax', 'af5w9c5uq9mf5', '9yv10yjy19dva', '9t1uh0g3vjnd7')
+ORDER BY a.time, a.db_id, decode(a.sql_id, 'fbf2t9pw12ynm', 1, 'ga6tfrmnrzwax', 2, 'af5w9c5uq9mf5', 3, '9yv10yjy19dva', 4, '9t1uh0g3vjnd7', 5), a.time, a.sql_plan_hash;

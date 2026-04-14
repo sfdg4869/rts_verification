@@ -1,0 +1,73 @@
+-- 쿼리 Bind 변수 ${schema_name} 입력 형식 : l11204_25fn_p2
+-- 쿼리 Bind 변수 ${partition_date} 입력 형식 : 250227 형식으로 입력
+-- 쿼리 Bind 변수 ${logging_time} 입력 형식 : '2025-02-27 15:30:00' 형식으로 입력
+
+-- ORA_SQL_ELAPSE 수집 결과 조회
+SELECT 
+    a.db_id,
+    b.instance_name,
+    a.sql_id,
+    a.sql_hash,
+    a.sql_addr,
+    a.sql_plan_hash,
+    count(*) as execution_count,
+    sum(a.ELAPSE)/1000.0 AS total_elapse_sec,
+    (sum(a.ELAPSE)/count(*))/1000.0 AS per_elapse_ms_to_sec -- ora_sql_elapse elapse unit : milliseconds (1 second = 1,000 milliseconds)
+FROM ${schema_name}.ora_sql_elapse a, public.apm_db_info b 
+WHERE a.db_id = b.db_id and a.partition_key > (${partition_date}000)
+  AND a.time >= ${logging_time}::timestamp
+  AND a.sql_id IN (
+        'fbf2t9pw12ynm',
+        'ga6tfrmnrzwax',
+        'af5w9c5uq9mf5',
+        '9yv10yjy19dva',
+        '9t1uh0g3vjnd7'
+  )
+group by a.db_id,
+    b.instance_name,
+    a.sql_id,
+    a.sql_hash,
+    a.sql_addr,
+    a.sql_plan_hash
+ORDER BY
+    a.db_id,
+    CASE a.sql_id
+        WHEN 'fbf2t9pw12ynm' THEN 1
+        WHEN 'ga6tfrmnrzwax' THEN 2
+        WHEN 'af5w9c5uq9mf5' THEN 3
+        WHEN '9yv10yjy19dva' THEN 4
+        WHEN '9t1uh0g3vjnd7' THEN 5
+        ELSE 999
+    END,
+    a.sql_plan_hash;
+
+-- ORA_SQL_STAT_10MIN 수집 결과 조회
+SELECT a.db_id, b.instance_name, 
+        a.time, 
+        a.sql_id, 
+        a.sql_hash, 
+        a.sql_addr, 
+        a.sql_plan_hash,
+        a.execution_count,
+        (a.elapsed_time/100.0) AS elapse_cs_to_sec, -- ora_sql_stat_10min elapsed_time unit : centiseconds (1 second = 100 centiseconds)
+        CASE WHEN a.EXECUTION_COUNT < 1 THEN NULL 
+                   ELSE ((a.elapsed_time/a.execution_count)/100.0)
+        END AS per_elapse_sec
+FROM ${schema_name}.ora_sql_stat_10min a, public.apm_db_info b 
+WHERE a.db_id = b.db_id AND a.partition_key > ${partition_date}000 AND a.time >= ${logging_time}::timestamp
+AND a.sql_id IN (
+        'fbf2t9pw12ynm',
+        'ga6tfrmnrzwax',
+        'af5w9c5uq9mf5',
+        '9yv10yjy19dva',
+        '9t1uh0g3vjnd7'
+  )
+ORDER BY
+    a.db_id,
+    CASE a.sql_id
+        WHEN 'fbf2t9pw12ynm' THEN 1
+        WHEN 'ga6tfrmnrzwax' THEN 2
+        WHEN 'af5w9c5uq9mf5' THEN 3
+        WHEN '9yv10yjy19dva' THEN 4
+        WHEN '9t1uh0g3vjnd7' THEN 5
+        ELSE 999

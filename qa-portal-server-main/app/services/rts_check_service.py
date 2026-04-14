@@ -262,12 +262,14 @@ def _find_latest_log(ssh: _SSHSession, log_dir: str, daemon: str) -> Optional[st
 
 
 def _step_error_grep(ssh: _SSHSession, base_dir: str, conf_name: str) -> Dict[str, Any]:
-    """Step 4: {CONF_NAME}/log/{CONF_NAME}/ 에서 rts/sndf/obsd 로그의 ERRO/ERROR grep"""
+    """Step 4: {CONF_NAME}/log/{CONF_NAME}/ 에서 rts/sndf/obsd 로그의 SIGBUS 등 비정상 시그널 grep.
+    키워드가 없으면 PASS, 있으면 FAIL."""
     t0 = time.time()
     log_dir = _log_root(base_dir, conf_name)
+    keyword_pattern = "|".join(_ABNORMAL_KEYWORDS)
     findings: List[str] = []
     error_samples: List[str] = []
-    has_error = False
+    has_signal = False
     has_missing = False
 
     for daemon in DAEMONS:
@@ -278,16 +280,16 @@ def _step_error_grep(ssh: _SSHSession, base_dir: str, conf_name: str) -> Dict[st
             continue
 
         fname = log_file.rsplit("/", 1)[-1]
-        cmd = f"tail -200 {log_file} | grep -iE 'ERRO|ERROR' | tail -5"
+        cmd = f"grep -iE '{keyword_pattern}' {log_file} | tail -5"
         out, err, rc = ssh.run(cmd)
         text = out.strip()
         if text:
-            has_error = True
+            has_signal = True
             lines = text.splitlines()
-            findings.append(f"{fname}: {len(lines)} error(s) — {lines[-1][:200]}")
-            error_samples.append(f"[{fname}] error logs:\n{text}")
+            findings.append(f"{fname}: {len(lines)} hit(s) — {lines[-1][:200]}")
+            error_samples.append(f"[{fname}] signal hit logs:\n{text}")
         else:
-            findings.append(f"{fname}: clean")
+            findings.append(f"{fname}: clean (no abnormal signal)")
 
     evidence = "; ".join(findings)
     if error_samples:
@@ -295,7 +297,7 @@ def _step_error_grep(ssh: _SSHSession, base_dir: str, conf_name: str) -> Dict[st
 
     return _step_result(
         "error_log_grep",
-        "fail" if (has_error or has_missing) else "pass",
+        "fail" if (has_signal or has_missing) else "pass",
         evidence,
         _elapsed_ms(t0),
     )
@@ -712,9 +714,7 @@ def run_rts_check(
             lambda: _step_rtsctl_stat(ssh, resolved_base, resolved_conf),
             lambda: _step_pid_match(ssh, resolved_conf, pid_map),
             lambda: _step_error_grep(ssh, resolved_base, resolved_conf),
-            lambda: _step_resource_usage(ssh, pid_map),
             lambda: _step_abnormal_signals(ssh, resolved_base, resolved_conf),
-            lambda: _step_target_vsql_query(db_row, host_override),
         ]
 
         pid_map: Dict[str, Optional[str]] = {d: None for d in DAEMONS}
@@ -736,7 +736,7 @@ def run_rts_check(
             except Exception as e:
                 step_names = [
                     "log_directory_check", "rtsctl_stat", "pid_cross_check",
-                    "error_log_grep", "resource_usage", "abnormal_signal_check", "target_vsql_query",
+                    "error_log_grep", "abnormal_signal_check",
                 ]
                 result["steps"].append(
                     _step_result(step_names[i], "fail", f"exception: {_mask_sensitive(str(e))}", 0)

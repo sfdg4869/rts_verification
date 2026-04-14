@@ -1,0 +1,13 @@
+DECLARE 
+    TYPE test_func_list IS TABLE OF VARCHAR(30);
+    v_funcs test_func_list := test_func_list('qs_sql_test_proc1', 'qs_sql_test_proc2', 'qs_sql_test_proc3', 'qs_sql_test_proc4', 'qs_sql_test_proc5');
+    test_execution NUMBER := 100;
+BEGIN
+    FOR i IN 1..v_funcs.COUNT LOOP
+        FOR j IN 1..test_execution LOOP
+            -- Synchronize data currently in the buffer cache to disk and remove it from the buffer cache
+            EXECUTE IMMEDIATE 'ALTER SYSTEM CHECKPOINT';
+            EXECUTE IMMEDIATE 'BEGIN ' || v_funcs(i) || '; END;';
+        END LOOP;
+    END LOOP;
+END;

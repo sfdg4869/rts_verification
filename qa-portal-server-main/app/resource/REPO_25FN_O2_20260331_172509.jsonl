@@ -1,0 +1,3 @@
+{"ts": 1774945514, "host_ip": "10.10.47.72", "conf_name": "REPO_25FN_O2", "daemon": "rts", "pid": "3341", "cpu_pct": 3.2, "mem_pct": 0.0, "rss_kb": 97204, "vsz_kb": 40694228}
+{"ts": 1774945514, "host_ip": "10.10.47.72", "conf_name": "REPO_25FN_O2", "daemon": "sndf", "pid": "3376", "cpu_pct": 0.4, "mem_pct": 0.0, "rss_kb": 788, "vsz_kb": 147904}
+{"ts": 1774945514, "host_ip": "10.10.47.72", "conf_name": "REPO_25FN_O2", "daemon": "obsd", "pid": "3387", "cpu_pct": 0.0, "mem_pct": 0.0, "rss_kb": 908, "vsz_kb": 14484}

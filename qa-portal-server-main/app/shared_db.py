@@ -385,6 +385,43 @@ def delete_db_profile(profile_name):
         _logger.error(f"DB 프로파일 삭제 실패: {e}")
         return False
 
+def connect_repo_by_config_id(config_id: str):
+    """
+    MongoDB id(UUID)로 특정 Repo DB에 직접 연결을 반환한다.
+    /api/v1/db_list가 반환하는 id 필드(UUID)를 사용해 db_configs_collection에서 직접 조회한다.
+    active 프로필을 변경하지 않는다. (conn, normalized_cfg) 튜플 반환.
+    """
+    try:
+        # /api/v1/db_list 와 동일하게 db_configs_collection에서 id(UUID)로 직접 조회
+        collection = db_config_service.db_configs_collection
+        if collection is None:
+            raise ValueError("MongoDB에 연결되어 있지 않습니다.")
+        target = collection.find_one({"id": config_id})
+        if target:
+            target.pop('_id', None)  # ObjectId 제거
+        if not target:
+            raise ValueError(f"config_id not found: {config_id}")
+        normalized = {
+            'host': target.get('host', ''),
+            'port': int(target.get('port', target.get('db_port', 5432)) or 5432),
+            'user': (
+                target.get('username') or target.get('db_user') or target.get('user') or ''
+            ),
+            'password': target.get('password') or target.get('db_password') or '',
+            'database': (
+                target.get('database') or target.get('service_name') or target.get('service') or ''
+            ),
+            'schema_name': target.get('schema_name', ''),
+            'db_type': target.get('db_type', 'postgresql').lower(),
+        }
+        engine = _infer_db_engine(normalized, 'postgresql')
+        if engine == 'oracle':
+            return _connect_oracle_db(normalized), normalized
+        return _connect_postgres_db(normalized), normalized
+    except Exception as e:
+        raise ValueError(f"POL Repo 연결 실패 ({config_id}): {e}") from e
+
+
 def get_mongodb_status():
     """MongoDB 연결 상태 확인"""
     try:

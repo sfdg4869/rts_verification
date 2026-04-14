@@ -504,6 +504,77 @@ def get_db_list():
             release_connection("repo", conn)
 
 
+@bp.route("/db-list-pol", methods=["POST"])
+def get_db_list_pol():
+    """두번째(POL) Repo의 APM_DB_INFO 목록 조회 — config_id로 임시 연결 후 반환"""
+    from app.services.db_config_service import DBConfigService
+    from app.shared_db import _infer_db_engine, _connect_oracle_db, _connect_postgres_db
+
+    data = request.get_json(silent=True) or {}
+    config_id = data.get("config_id")
+    if not config_id:
+        return jsonify({"error": "config_id is required"}), 400
+
+    service = DBConfigService()
+    if not service.is_connected():
+        return jsonify({"error": "MongoDB 연결 실패"}), 500
+
+    doc = service.db_configs_collection.find_one({"id": config_id})
+    if not doc:
+        return jsonify({"error": f"config_id '{config_id}' not found"}), 400
+
+    cfg = {
+        "host": doc.get("host", ""),
+        "port": int(doc.get("db_port", doc.get("port", 5432))),
+        "user": doc.get("db_user", doc.get("user", "")),
+        "password": doc.get("db_password", doc.get("password", "")),
+        "database": doc.get("database", doc.get("service", "")),
+        "service": doc.get("service", doc.get("database", "")),
+        "service_type": doc.get("service_type") or doc.get("serviceType") or "",
+        "db_type": (doc.get("db_type") or "postgresql").lower(),
+        "schema_name": (doc.get("schema_name") or "").strip(),
+    }
+
+    conn = None
+    try:
+        engine = _infer_db_engine(cfg, "postgresql")
+        if engine == "oracle":
+            conn = _connect_oracle_db(cfg)
+        else:
+            # 임시 조회용 — 풀 캐시 우회, 직접 연결
+            import psycopg2
+            from app.services.dg_password_service import decrypt_dg_password
+            raw_pw = cfg.get("password") or cfg.get("db_password") or ""
+            conn = psycopg2.connect(
+                host=cfg["host"],
+                port=int(cfg.get("port") or cfg.get("db_port") or 5432),
+                database=cfg.get("database") or cfg.get("service") or "",
+                user=cfg.get("user") or cfg.get("db_user") or "",
+                password=decrypt_dg_password(raw_pw),
+                sslmode="disable",
+            )
+
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT db_id, instance_name, host_ip, host_name, host_id, "
+            "db_user, sid, lsnr_ip, lsnr_port, os_type, oracle_version "
+            "FROM apm_db_info ORDER BY db_id ASC"
+        )
+        columns = ["db_id", "instance_name", "host_ip", "host_name", "host_id",
+                   "db_user", "sid", "lsnr_ip", "lsnr_port", "os_type", "oracle_version"]
+        rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        cursor.close()
+        return jsonify({"data": rows, "count": len(rows), "engine": engine}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
 @bp.route("/run", methods=["POST"])
 @swag_from(_RUN_SPEC)
 def run_check():
@@ -744,7 +815,7 @@ def run_repo_new_api():
 
 @bp.route("/run-repo-new-job", methods=["POST"])
 def run_repo_new_job_api():
-    """Repo 신규 점검 비동기 job 시작"""
+    """Repo 신규 점검 비동기 job 시작 (VSQL Repo + 선택적 POL Repo 동시 조회)"""
     from app.services.new_repo_check_service import run_new_repo_check
     from app.services.target_sql_test_service import _get_apm_db_row_with_secret
 
@@ -759,6 +830,9 @@ def run_repo_new_job_api():
     repo_partition_date = data.get("repo_partition_date")
     repo_logging_time = data.get("repo_logging_time")
     repo_schema_name = (data.get("schema_name") or data.get("repo_pg_schema") or "").strip() or None
+    pol_repo_config_id = data.get("pol_repo_config_id") or None
+    pol_repo_schema_name = (data.get("pol_repo_schema_name") or "").strip() or None
+    pol_repo_db_id_list = data.get("pol_repo_db_id_list") or None
 
     if not db_id and not target_cfg:
         return jsonify({"error": "db_id or target_config is required"}), 400
@@ -825,6 +899,9 @@ def run_repo_new_job_api():
                 repo_partition_date=repo_partition_date,
                 repo_logging_time=repo_logging_time,
                 repo_schema_name=repo_schema_name,
+                pol_repo_config_id=pol_repo_config_id,
+                pol_repo_schema_name=pol_repo_schema_name,
+                pol_repo_db_id_list=pol_repo_db_id_list,
             )
             with _REPO_JOB_LOCK:
                 job = _REPO_JOBS.get(job_id)

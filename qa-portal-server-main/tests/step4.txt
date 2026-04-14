@@ -1,0 +1,26 @@
+-- V$SQL에서 Case 1 ~ Case 6 에 대한 수행 결과 조회 
+SELECT 
+    sql_id, 
+    plan_hash_value, 
+    executions, 
+    (elapsed_time/1000000) AS elapsed_us_to_sec, 
+    CASE WHEN executions = 0 THEN NULL ELSE ((elapsed_time/executions)/1000000) END AS per_elapse_sec,
+    sql_fulltext 
+FROM v$sql WHERE 1=1 
+AND (
+    upper(sql_text) LIKE upper('DECLARE%test_func_list %')
+    OR upper(sql_text) LIKE upper('BEGIN qs_sql_test_proc1%')
+    OR upper(sql_text) LIKE upper('BEGIN qs_sql_test_proc2%')
+    OR upper(sql_text) LIKE upper('BEGIN qs_sql_test_proc3%')
+    OR upper(sql_text) LIKE upper('BEGIN qs_sql_test_proc4%')
+    OR upper(sql_text) LIKE upper('BEGIN qs_sql_test_proc5%')
+)
+ORDER BY
+CASE WHEN upper(sql_text) LIKE upper('DECLARE%test_func_list %') THEN 1  -- SQL ID : 9fbyurzh8tr4c      (Case1 : PLSQL 전문 쿼리)
+    WHEN upper(sql_text) LIKE upper('BEGIN qs_sql_test_proc1%') THEN 2      -- SQL ID : fbf2t9pw12ynm   (Case2 : 5초 동안 수행되는 프로시저 호출 쿼리)
+    WHEN upper(sql_text) LIKE upper('BEGIN qs_sql_test_proc2%') THEN 3      -- SQL ID : ga6tfrmnrzwax    (Case3 : 1초 동안 수행되는 프로시저 호출 쿼리)    
+    WHEN upper(sql_text) LIKE upper('BEGIN qs_sql_test_proc3%') THEN 4      -- SQL ID : af5w9c5uq9mf5  (Case4 : 0.05초 동안 수행되는 프로시저 호출 쿼리)
+    WHEN upper(sql_text) LIKE upper('BEGIN qs_sql_test_proc4%') THEN 5      -- SQL ID : 9yv10yjy19dva    (Case5 : 0.01초 동안 수행되는 프로시저 호출 쿼리)
+    WHEN upper(sql_text) LIKE upper('BEGIN qs_sql_test_proc5%') THEN 6      -- SQL ID : 9t1uh0g3vjnd7    (Case6 : 0.001초 동안 수행되는 프로시저 호출 쿼리)
+    ELSE 7
+END, plan_hash_value;

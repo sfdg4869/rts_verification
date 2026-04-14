@@ -1,0 +1,152 @@
+/* V$SQL에서 검증 대상 쿼리들에 대한 이력 초기화 (Shared Pool에서 날림) */
+-- test 대상 procedure와 sql SGA shared pool 에서 purge
+-- SYS.DBMS_SHARED_POOL.PURGE 기능의 경우 오라클 버전 10.2 이상부터 제공됨
+-- 단, Purge 작업도 DB 버전에 따라 Purge 가능 범위가 달라짐
+-- 10.2 이상 11.2 미만인 경우 Procedure에 대한 Purge만 가능하며, 11.2 이상부터는 Procedure와 SQL에 대한 Purge도 가능
+DECLARE
+        testuser_name varchar2(20);
+        db_major_version number; 
+        db_major_feature_version NUMBER; 
+        TYPE cursor_type IS REF CURSOR;
+        procedure_cursor cursor_type;
+        sql_cursor cursor_type;
+        testuser_proc varchar2(100);
+        sql_addr_hash varchar2(100);
+BEGIN
+        
+        testuser_name := 'maxgauge';
+        
+        -- db version check
+        SELECT REGEXP_SUBSTR(version, '^\d+'), REGEXP_SUBSTR(version, '(?<=\.)\d+', 1, 1) INTO db_major_version, db_major_feature_version FROM v$instance;
+
+        -- db version = 10g
+        IF db_major_version = 10 THEN
+                -- 10g bug fix apply
+                EXECUTE IMMEDIATE q'[ALTER SESSION SET EVENTS '5614566 trace name context forever']';
+                
+                -- SYS.DBMS_SHARED_POOL.PURGE only db version >= 10.2 
+                IF db_major_feature_version >= 2 THEN 
+                
+                        -- 10.2 <= db version < 11.2, only procedure purge
+                        -- test procedure purge start
+                        -- procedure cursor open
+                        OPEN procedure_cursor FOR 
+                                SELECT owner || '.' || object_name FROM dba_objects 
+                                WHERE upper(owner) = upper(testuser_name) AND object_type = 'PROCEDURE' AND upper(object_name) IN (
+                                        upper('qs_sql_test_proc1'),
+                                        upper('qs_sql_test_proc2'),
+                                        upper('qs_sql_test_proc3'),
+                                        upper('qs_sql_test_proc4'),
+                                        upper('qs_sql_test_proc5')
+                                );
+                        LOOP
+                                FETCH procedure_cursor INTO testuser_proc;
+                                EXIT WHEN procedure_cursor%NOTFOUND;
+                        
+                                -- procedure remove from SGA shared pool
+                                SYS.DBMS_SHARED_POOL.PURGE(testuser_proc, 'P');
+                                    DBMS_OUTPUT.PUT_LINE('Purged Procedure: ' || testuser_proc);
+                                
+                        END LOOP;
+                        
+                        -- procedure cursor close
+                        CLOSE procedure_cursor; 
+                
+                ELSE 
+                        -- nothing to do
+                        NULL;
+                END IF;
+                
+        -- db version >= 11g        
+        ELSIF db_major_version >= 11 THEN
+                        -- 10.2 <= db version < 11.2, only procedure purge
+                        IF (db_major_version = 11) AND (db_major_feature_version < 2) THEN 
+                                -- test procedure purge start
+                                -- procedure cursor open
+                                OPEN procedure_cursor FOR 
+                                        SELECT owner || '.' || object_name FROM dba_objects 
+                                        WHERE upper(owner) = upper(testuser_name) AND object_type = 'PROCEDURE' AND upper(object_name) IN (
+                                                upper('qs_sql_test_proc1'),
+                                                upper('qs_sql_test_proc2'),
+                                                upper('qs_sql_test_proc3'),
+                                                upper('qs_sql_test_proc4'),
+                                                upper('qs_sql_test_proc5')
+                                        );
+                                LOOP
+                                        FETCH procedure_cursor INTO testuser_proc;
+                                        EXIT WHEN procedure_cursor%NOTFOUND;
+                                
+                                        -- procedure remove from SGA shared pool
+                                        SYS.DBMS_SHARED_POOL.PURGE(testuser_proc, 'P');
+                                            DBMS_OUTPUT.PUT_LINE('Purged Procedure: ' || testuser_proc);
+                                        
+                                END LOOP;
+                                
+                                -- procedure cursor close
+                                CLOSE procedure_cursor; 
+                        
+                        -- if db version >= 11.2, procedure & sql cursor purge
+                        ELSE        
+                                -- test procedure purge start
+                                -- procedure cursor open
+                                OPEN procedure_cursor FOR 
+                                        SELECT owner || '.' || object_name FROM dba_objects 
+                                        WHERE upper(owner) = upper(testuser_name) AND object_type = 'PROCEDURE' AND upper(object_name) IN (
+                                                upper('qs_sql_test_proc1'),
+                                                upper('qs_sql_test_proc2'),
+                                                upper('qs_sql_test_proc3'),
+                                                upper('qs_sql_test_proc4'),
+                                                upper('qs_sql_test_proc5')
+                                        );
+                                LOOP
+                                        FETCH procedure_cursor INTO testuser_proc;
+                                        EXIT WHEN procedure_cursor%NOTFOUND;
+                                
+                                        -- procedure remove from SGA shared pool
+                                        SYS.DBMS_SHARED_POOL.PURGE(testuser_proc, 'P');
+                                            DBMS_OUTPUT.PUT_LINE('Purged Procedure: ' || testuser_proc);
+                                        
+                                END LOOP;
+                                
+                                -- procedure cursor close
+                                CLOSE procedure_cursor; 
+                                
+                                -- test sql cursor purge start
+                                -- sql cursor open
+                                OPEN sql_cursor FOR 
+                                        SELECT address || ',' || hash_value FROM v$sqlarea 
+                                        WHERE upper(sql_text) LIKE upper('DECLARE%test_func_list %')
+                                                                            OR upper(sql_text) LIKE upper('BEGIN qs_sql_test_proc1%')
+                                                                            OR upper(sql_text) LIKE upper('BEGIN qs_sql_test_proc2%')
+                                                                            OR upper(sql_text) LIKE upper('BEGIN qs_sql_test_proc3%')
+                                                                            OR upper(sql_text) LIKE upper('BEGIN qs_sql_test_proc4%')
+                                                                            OR upper(sql_text) LIKE upper('BEGIN qs_sql_test_proc5%');
+                                LOOP
+                                        FETCH sql_cursor INTO sql_addr_hash;
+                                        EXIT WHEN sql_cursor%NOTFOUND;
+                                
+                                        -- sql remove from SGA shared pool
+                                        SYS.DBMS_SHARED_POOL.PURGE(sql_addr_hash, 'C', 1);
+                                            DBMS_OUTPUT.PUT_LINE('Purged SQL: ' || sql_addr_hash);
+                                END LOOP;
+                                        
+                                -- sql cursor close        
+                                CLOSE sql_cursor;
+                                
+                        END IF;
+                                
+        ELSE 
+                NULL;
+        END IF;        
+END;
+
+-- 테스트 대상 프로시저 삭제
+DECLARE
+        test_db_user varchar2(20) := 'maxgauge';
+BEGIN
+        EXECUTE IMMEDIATE 'DROP PROCEDURE ' || test_db_user || '.qs_sql_test_proc1';
+        EXECUTE IMMEDIATE 'DROP PROCEDURE ' || test_db_user || '.qs_sql_test_proc2';
+        EXECUTE IMMEDIATE 'DROP PROCEDURE ' || test_db_user || '.qs_sql_test_proc3';
+        EXECUTE IMMEDIATE 'DROP PROCEDURE ' || test_db_user || '.qs_sql_test_proc4';
+        EXECUTE IMMEDIATE 'DROP PROCEDURE ' || test_db_user || '.qs_sql_test_proc5';
+END;

@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>맥스게이지 리포지토리 수집 검증(RTS Check) 메뉴얼</title>
+    <style>
+        :root {
+            --primary-color: #0a4c5a;
+            --text-color: #333;
+            --bg-color: #f8f9fa;
+            --border-color: #ddd;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            line-height: 1.6;
+            color: var(--text-color);
+            background-color: var(--bg-color);
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background: #fff;
+            padding: 40px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: var(--primary-color);
+            border-bottom: 2px solid var(--primary-color);
+            padding-bottom: 10px;
+            text-align: center;
+        }
+        h2 {
+            color: #1a73e8;
+            margin-top: 30px;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 5px;
+        }
+        h3 {
+            color: #d93025;
+            margin-top: 25px;
+        }
+        .step-box {
+            background: #f1f3f4;
+            border-left: 4px solid var(--primary-color);
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 0 4px 4px 0;
+        }
+        .grid-explain-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        .grid-explain-table th, .grid-explain-table td {
+            border: 1px solid var(--border-color);
+            padding: 12px;
+            text-align: left;
+        }
+        .grid-explain-table th {
+            background-color: var(--primary-color);
+            color: white;
+            text-align: center;
+        }
+        .highlight {
+            font-weight: bold;
+            color: #d93025;
+        }
+        .highlight-blue {
+            font-weight: bold;
+            color: #1a73e8;
+        }
+        .note {
+            font-size: 0.9em;
+            color: #666;
+            background: #fff3cd;
+            border-left: 4px solid #ffecb5;
+            padding: 10px;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>맥스게이지 리포지토리 수집 검증<br>(RTS Check) 사용자 메뉴얼</h1>
+    
+    <div class="step-box" style="margin-top:30px;">
+        <strong>목적:</strong> 본 메뉴얼은 새롭게 추가된 <b>[Repo 점검 항목_신규]</b> 기능의 UI 사용 방법과 결과 표(Grid)의 해석 방법을 안내합니다. 본 기능은 Target DB에서 실제 발생한 성능 데이터가 MaxGauge 수집기를 거쳐 유실 없이 Repo DB에 적재되었는지 교차 검증하는 자동화 도구입니다.
+    </div>
+
+    <h2>1. 화면 UI 조작 가이드 (사전 설정 ~ 실행 단계)</h2>
+    <p>아래 1번부터 5번까지, 실제 화면과 버튼 순서에 따라 차례대로 진행하시면 됩니다.</p>
+    
+    <!-- Step 1 -->
+    <div style="border:1px solid var(--border-color); padding:20px; border-radius:6px; background:#fff; margin-bottom:20px;">
+        <h3 style="margin-top:0; color:#333; display:flex; align-items:center; gap:8px;">
+            <span style="background:#4a86e8; color:white; border-radius:50%; width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; font-size:14px;">1</span> 
+            Repo DB 연결
+        </h3>
+        <div style="border:1px solid #ddd; padding:10px 15px; border-radius:6px; margin-bottom:15px; font-size:13px; color:#555;">
+            <span style="border:1px solid #4ade80; color:#15803d; border-radius:15px; padding:2px 10px; font-weight:bold; font-size:11px; margin-right:10px;">CONNECTED</span>
+            Type: <b>oracle</b> &nbsp;&nbsp;&nbsp; Host: <b>10.10.47.72:1521</b> &nbsp;&nbsp;&nbsp; DB: <b>T_REPO_25FINAL2</b> &nbsp;&nbsp;&nbsp; User: <b>REPO_25FINAL2</b>
+        </div>
+        <div style="display:flex; border-bottom:1px solid #ddd; margin-bottom:15px; font-size:14px;">
+            <div style="padding:10px 15px; border-bottom:2px solid #4a86e8; color:#4a86e8; font-weight:bold;">MongoDB 저장 목록</div>
+            <div style="padding:10px 15px; color:#777;">직접 입력</div>
+        </div>
+        <div style="background:#f9f9f9; padding:15px; border:1px solid #eee; border-radius:4px; margin-top:10px;">
+            <button style="background:#eee; color:#333; border:1px solid #ccc; padding:8px 16px; border-radius:4px; margin-right:10px; font-weight:bold;">MongoDB DB 목록 불러오기</button>
+            <span style="font-size:13px; color:#15803d;">8건의 DB 설정을 찾았습니다.</span>
+            <div style="border:1px solid #ccc; background:white; margin-top:15px; overflow-y:scroll; height:150px; font-size:12px;">
+                <table style="width:100%; border-collapse:collapse; text-align:left;">
+                    <tr style="background:#f1f3f4;"><th style="padding:8px;">Name</th><th>Host</th><th>Port</th><th>DB Type</th><th>Database</th><th>User</th><th>Description</th></tr>
+                    <tr><td style="padding:8px;"><input type="radio" checked> 25FIN ORACLE REPO</td><td>10.10.47.72</td><td>1521</td><td>oracle</td><td>T_REPO...</td><td>REPO_...</td><td>-</td></tr>
+                </table>
+            </div>
+            <div style="margin-top:15px; display:flex; align-items:center;">
+                <button style="background:#5c6bc0; color:white; border:none; padding:10px 20px; border-radius:4px; font-weight:bold; font-size:14px;">Repo DB로 설정</button>
+                <span style="font-size:13px; color:#15803d; margin-left:15px;">Repo DB 설정 완료 (25FIN ORACLE REPO / 10.10.47.72:1521)</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Step 2 -->
+    <div style="border:1px solid var(--border-color); padding:20px; border-radius:6px; background:#fff; margin-bottom:20px;">
+        <h3 style="margin-top:0; color:#333; display:flex; align-items:center; gap:8px;">
+            <span style="background:#4a86e8; color:white; border-radius:50%; width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; font-size:14px;">2</span> 
+            Target DB 선택 (APM_DB_INFO)
+        </h3>
+        <div style="margin-bottom:15px; display:flex; align-items:center;">
+            <button style="background:#5c6bc0; color:white; border:none; padding:10px 20px; border-radius:4px; font-weight:bold;">DB 목록 조회</button>
+            <span style="font-size:13px; color:#555; margin-left:15px;">25건 조회됨</span>
+        </div>
+        <div style="border:1px solid #ccc; background:white; overflow-y:scroll; height:180px; font-size:12px;">
+            <table style="width:100%; border-collapse:collapse; text-align:left;">
+                <tr style="background:#f1f3f4;">
+                    <th style="padding:8px;">DB ID</th><th>INSTANCE</th><th>HOST IP</th><th>HOST NAME</th><th>DB USER</th><th>SID</th><th>LSNR PORT</th><th>OS</th>
+                </tr>
+                <tr><td style="padding:8px;">254</td><td>A10203_25FN_O2</td><td>10.10.47.34</td><td>r1</td><td>maxgauge</td><td>ORCL</td><td>1521</td><td>AIX5</td></tr>
+                <tr style="background:#e8f0fe;"><td style="padding:8px;">255</td><td>REPO_25FN_O2</td><td>10.10.47.72</td><td>qs72</td><td>maxgauge</td><td>ORA11204</td><td>1521</td><td>LINUX</td></tr>
+                <tr><td style="padding:8px;">256</td><td>L193000_25FN_O2</td><td>10.20.132.109</td><td>aysvm_qs109</td><td>c##maxgauge</td><td>ORA19C</td><td>1521</td><td>LINUX</td></tr>
+            </table>
+        </div>
+        <p style="font-size:13px; color:#d93025; margin-top:10px;">↑ 표에서 점검할 Target DB 라인(Row)을 한 번 클릭하여 위처럼 파란색 선택 상태로 만들어주셔야 합니다.</p>
+    </div>
+
+    <!-- Step 3 & 4 -->
+    <div style="border:1px solid var(--border-color); padding:20px; border-radius:6px; background:#f9fbfe; margin-bottom:20px;">
+        <h3 style="margin-top:0; color:#333; display:flex; align-items:center; gap:8px;">
+            <span style="background:#4a86e8; color:white; border-radius:50%; width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; font-size:14px;">3</span> SSH 접속 정보 & 옵션
+        </h3>
+        <p style="font-size:12px; color:#777; margin-bottom:15px;">※ SSH 정보는 <b>Target 점검 실행</b>(RTS 7단계)에서만 사용됩니다. <b>Repo 점검 실행</b>에는 사용되지 않습니다.</p>
+        <div style="display:flex; flex-wrap:wrap; gap:15px; margin-bottom:30px;">
+            <div><label style="font-size:12px; display:block; margin-bottom:4px;">SSH User *</label><input type="text" value="maxgauge" style="padding:8px; border:1px solid #ccc; border-radius:4px; width:150px;"></div>
+            <div><label style="font-size:12px; display:block; margin-bottom:4px;">SSH Password *</label><input type="password" placeholder="비밀번호" style="padding:8px; border:1px solid #ccc; border-radius:4px; width:150px;"></div>
+            <div><label style="font-size:12px; display:block; margin-bottom:4px;">SSH Port</label><input type="number" value="22" style="padding:8px; border:1px solid #ccc; border-radius:4px; width:120px;"></div>
+            <div><label style="font-size:12px; display:block; margin-bottom:4px;">Conf Name</label><input type="text" placeholder="자동" style="padding:8px; border:1px solid #ccc; border-radius:4px; width:150px;"></div>
+        </div>
+
+        <h3 style="margin-top:0; color:#333; display:flex; align-items:center; gap:8px;">
+            <span style="background:#4a86e8; color:white; border-radius:50%; width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; font-size:14px;">4</span> Target DB 접속정보 (쿼리 실행 전용)
+        </h3>
+        <p style="font-size:12px; color:#777; margin-bottom:15px;">※ Step 2에서 선택한 Target DB 정보(host/port/user/sid)를 사용합니다. 비밀번호만 입력하세요.</p>
+        <div style="border:1px solid #ddd; padding:10px 15px; border-radius:6px; margin-bottom:15px; font-size:13px; color:#555; background:white;">
+            <span style="border:1px solid #4ade80; color:#15803d; border-radius:15px; padding:2px 10px; font-weight:bold; font-size:11px; margin-right:10px;">TARGET SELECTED</span>
+            db_id: <b>255</b> &nbsp;&nbsp;&nbsp; host: <b>10.10.47.72:1521</b> &nbsp;&nbsp;&nbsp; user: <b>maxgauge</b> &nbsp;&nbsp;&nbsp; sid: <b>ORA11204</b>
+        </div>
+        <div>
+            <label style="font-size:12px; font-weight:bold; color:#555; display:block; margin-bottom:5px;">Target Password *</label>
+            <input type="password" placeholder="********" style="padding:8px; border:1px solid #ccc; border-radius:4px; width:200px;">
+        </div>
+        <div style="margin-top:15px;">
+            <button style="background:#f1f3f4; color:#333; border:1px solid #ccc; padding:8px 16px; border-radius:4px; font-weight:bold;">Target 쿼리 실행(3개)</button>
+        </div>
+    </div>
+
+    <!-- Step 5 & Bottom -->
+    <div style="border:1px solid var(--border-color); padding:20px; border-radius:6px; background:#fff; margin-bottom:20px;">
+        <h3 style="margin-top:0; color:#333; display:flex; align-items:center; gap:8px;">
+            <span style="background:#4a86e8; color:white; border-radius:50%; width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; font-size:14px;">5</span> 점검 실행
+        </h3>
+        
+        <div style="margin-bottom:10px;">
+            <span style="font-size:12px; color:#555; margin-bottom:5px; display:block;">Target 점검 항목</span>
+            <div style="display:flex; gap:5px; flex-wrap:wrap; font-size:10px; color:#666;">
+                <span style="border:1px solid #ddd; padding:4px 8px; border-radius:4px;">1. 로그 디렉터리</span>
+                <span style="border:1px solid #ddd; padding:4px 8px; border-radius:4px;">2. rtsctl stat</span>
+                <span style="border:1px solid #ddd; padding:4px 8px; border-radius:4px;">3. PID 교차검증</span>
+                <span style="border:1px solid #ddd; padding:4px 8px; border-radius:4px;">4. ERROR grep</span>
+                <span style="border:1px solid #ddd; padding:4px 8px; border-radius:4px;">5. CPU/MEM</span>
+                <span style="border:1px solid #ddd; padding:4px 8px; border-radius:4px;">6. 비정상 종료 시그널</span>
+                <span style="border:1px solid #ddd; padding:4px 8px; border-radius:4px;">7. Target 조회(v$sql)</span>
+            </div>
+        </div>
+        
+        <div style="margin-bottom:20px;">
+            <span style="font-size:12px; color:#555; margin-bottom:5px; display:block;">Repo 점검 항목</span>
+            <div style="display:flex; gap:5px; flex-wrap:wrap; font-size:10px; color:#666;">
+                <span style="border:1px solid #ddd; padding:4px 8px; border-radius:4px;">1. 누락 재현 여부</span>
+                <span style="border:1px solid #ddd; padding:4px 8px; border-radius:4px;">2. ELAPSE 로깅</span>
+                <span style="border:1px solid #ddd; padding:4px 8px; border-radius:4px;">3. STAT_10MIN 로깅</span>
+                <span style="border:1px solid #ddd; padding:4px 8px; border-radius:4px;">4. ELAPSED/EXECUTION</span>
+            </div>
+        </div>
+
+        <div style="background:#f9f9f9; padding:20px; border:1px solid #eee; border-radius:4px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+            <button style="background:#5c6bc0; color:white; border:none; padding:10px 22px; border-radius:6px; font-weight:bold;">Target 점검 실행</button>
+            <button style="background:#5c6bc0; color:white; border:none; padding:10px 22px; border-radius:6px; font-weight:bold;">Repo 점검 실행</button>
+            
+            <button style="background:#0a4c5a; color:white; border:none; padding:12px 24px; border-radius:6px; font-weight:bold; box-shadow:0 4px 6px rgba(0,0,0,0.1);">Repo 점검 항목_신규</button>
+            
+            <input type="password" placeholder="SYS 비밀번호(선택)" style="padding:10px; border:1px solid #ccc; border-radius:6px; width:160px; margin-left:10px;" disabled>
+        </div>
+        <p style="font-size:12px; color:#777; margin-top:10px;">Repo 점검 실행은 <b>Step 1 Repo DB 연결값</b>과 <b>Step 2 Target DB 선택값</b>을 사용합니다.</p>
+    </div>
+
+    <!-- CPU/MEM 조회 -->
+    <div style="border:1px solid var(--border-color); padding:20px; border-radius:6px; background:#f9fbfe; margin-bottom:20px;">
+        <h3 style="margin-top:0; color:#333; font-size:16px;">CPU / MEM 전용 조회</h3>
+        <p style="font-size:12px; color:#777;">Step 2 Target + Step 3 SSH 정보를 사용해 현재값/2시간 집계값을 조회합니다.</p>
+        <div style="display:flex; gap:10px; margin-top:15px;">
+            <button style="background:#5c6bc0; color:white; border:none; padding:8px 16px; border-radius:4px;">현재값 조회</button>
+            <button style="background:#5c6bc0; color:white; border:none; padding:8px 16px; border-radius:4px;">2시간 집계 조회</button>
+        </div>
+    </div>    <h2>2. 버튼별 점검 결과 해석 가이드</h2>
+    <p>5단계에서 어떤 버튼을 눌렀느냐에 따라 생성되는 결과 화면과 해석 방법이 다릅니다.</p>
+
+    <h3 style="color:#0a4c5a; border-left:4px solid #0a4c5a; padding-left:10px;">2.1 <span style="background:#5c6bc0; color:white; padding:4px 8px; border-radius:4px; font-size:14px; vertical-align:middle;">Target 점검 실행</span> 은 무엇을 점검하나요?</h3>
+    <p>Target DB 서버에 <b>SSH로 직접 접속</b>하여 RTS 수집 에이전트가 정상 작동하는지 7단계로 점검합니다.</p>
+    <ul style="line-height:1.8; color:#444;">
+        <li><b>1. 로그 디렉터리:</b> rts_log, ocr_log 등 필수 수집 로그 폴더가 존재하는지 검사합니다.</li>
+        <li><b>2. rtsctl stat:</b> 에이전트 제어 명령어(rtsctl stat)가 정상 호출되고 상태가 Active인지 확인합니다.</li>
+        <li><b>3. PID 교차검증:</b> 로그에 기록된 데몬의 PID 번호가 Target 서버 OS 상에 실제 프로세스로 떠있는지 비교합니다.</li>
+        <li><b>4. ERROR grep:</b> 에이전트 동작 로그(*.log) 내부에 치명적인 ERROR 문구가 발생했는지 문자열을 스캔합니다.</li>
+        <li><b>5. CPU/MEM:</b> 해당 수집 데몬 프로세스가 OS의 CPU와 메모리를 비정상적으로 많이 점유하지 않는지 확인합니다.</li>
+        <li><b>6. 비정상 종료 시그널:</b> 수집기가 과거 비정상적인 시그널(Kill 등)을 받고 종료된 이력이 있는지 점검합니다.</li>
+        <li><b>7. Target 조회(v$sql):</b> Target 서버를 향해 10초짜리 미니 쿼리 5번을 쏜 뒤, Target 오라클 내부 `V$SQL` 테이블에 쿼리 소요시간이 정확히 50초로 기록되었는지 DB 단에서 1차 확인합니다.</li>
+    </ul>
+
+    <h3 style="color:#0a4c5a; border-left:4px solid #0a4c5a; padding-left:10px; margin-top:30px;">2.2 <span style="background:#5c6bc0; color:white; padding:4px 8px; border-radius:4px; font-size:14px; vertical-align:middle;">Repo 점검 실행</span> 은 무엇을 점검하나요?</h3>
+    <p>Target 수집 에이전트가 쏘아올린 데이터가 매니저 서버의 <b>Repo DB (저장소)</b>에 유실 없이 잘 적재되었는지 6단계로 점검합니다. (이때 오늘 날짜의 파티션 데이터를 스캔합니다.)</p>
+    <ul style="line-height:1.8; color:#444;">
+        <li><b>1. 누락 재현 여부:</b> APM_TOP_OS_PROCESS_LIST 테이블에 수집기 프로세스 정보가 누락 없이 기록되는지 쿼리합니다.</li>
+        <li><b>2. ELAPSE 1초 초과 로깅:</b> ORA_SQL_ELAPSE 테이블에 소요 시간이 1초를 초과하는 무거운 쿼리들이 정상 이관되고 있는지 검증합니다.</li>
+        <li><b>3. STAT 50초 이상 로깅:</b> ORA_SQL_STAT_10MIN 모음 테이블에 총 50초 이상 누적된 지표 기록이 존재하는지 스캔합니다.</li>
+        <li><b>4. ELAPSED/EXECUTION:</b> 단순히 시간만 찍히는 것이 아니라 쿼리 수행 횟수(Execution)와 소요 시간의 비율이 맞는지 검사합니다.</li>
+        <li><b>5. 대상 SQL 수집 확인 (Elapse):</b> Target 검사 7단계에서 쐈던 10초짜리 미니 쿼리 5회의 내역이 <b>개별 실행 단위(Elapse)</b>로 Repo에 무사히 도착했는지 확인합니다.</li>
+        <li><b>6. 대상 SQL 수집 확인 (Stat):</b> 미니 쿼리 5번의 내역이 10분 단위 통계 테이블(Stat_10Min)에 <b>누적 50초, 5회</b>로 잘 합산 계산되어 적재되었는지 검사합니다.</li>
+    </ul>
+
+    <h3 style="color:#0a4c5a; border-left:4px solid #0a4c5a; padding-left:10px; margin-top:30px;">2.3 <span style="background:#0a4c5a; color:white; padding:4px 8px; border-radius:4px; font-size:14px; vertical-align:middle;">Repo 점검 항목_신규</span> 는 무엇을 점검하나요?</h3>
+    <p>위 두 버튼(Target/Repo 점검)을 <b>원스톱으로 통합하여 양쪽 데이터를 1:1로 교차 비교</b>하는 신규 궁극기 버튼입니다.</p>
+    <ul style="line-height:1.8; color:#444;">
+        <li><b>- 부하 주입:</b> Target DB에 11가지의 각기 다른 케이스(CPU Burn, Sleep, Fetch 등)의 악성 쿼리를 강제 실행하여 부하를 줍니다.</li>
+        <li><b>- 대조 측정:</b> Target DB 내부 시스템 테이블(`V$SQL`)에 찍힌 실제 부하 소요시간을 파이썬이 즉시 캡처합니다.</li>
+        <li><b>- 수집 검증:</b> 이후 Repo DB의 저장 테이블(`ORA_SQL_ELAPSE`, `STAT`)을 뒤져 동일한 SQL_ID 데이터가 전송되었는지 추출합니다.</li>
+        <li><b>- 시각화:</b> 양쪽 DB의 지표 수치가 소수점 아래까지 정확히 일치하는지 한눈에 비교할 수 있도록 아래와 같은 <b>대형 병합 표(Grid)</b>를 생성합니다.</li>
+    </ul>
+    
+    <div style="overflow-x:auto; border:2px solid #ccc; border-radius:6px; margin:20px 0; padding-bottom:10px;">
+        <table style="width:100%; border-collapse:collapse; text-align:left; font-size:11px; min-width:1200px;">
+            <thead>
+                <tr style="background:#0a4c5a; color:white;">
+                    <th rowspan="3" style="border:1px solid #ccc; padding:6px; text-align:center;">Test Case</th>
+                    <th rowspan="3" style="border:1px solid #ccc; padding:6px; text-align:center;">Test Procedure</th>
+                    <th rowspan="3" style="border:1px solid #ccc; padding:6px; text-align:center;">검증 대상 쿼리</th>
+                    <th colspan="2" rowspan="2" style="border:1px solid #ccc; padding:6px; text-align:center;">Target DB > V$SQL</th>
+                    <th colspan="4" style="border:1px solid #ccc; padding:4px; text-align:center;">Repo DB > ORA_SQL_ELAPSE</th>
+                    <th colspan="4" style="border:1px solid #ccc; padding:4px; text-align:center;">Repo DB > ORA_SQL_STAT_10MIN</th>
+                </tr>
+                <tr style="background:#0a4c5a; color:white;">
+                    <th colspan="2" style="border:1px solid #ccc; padding:4px; text-align:center;">VSQL_RTS</th>
+                    <th colspan="2" style="border:1px solid #ccc; padding:4px; text-align:center;">POL_RTS</th>
+                    <th colspan="2" style="border:1px solid #ccc; padding:4px; text-align:center;">VSQL_RTS</th>
+                    <th colspan="2" style="border:1px solid #ccc; padding:4px; text-align:center;">POL_RTS</th>
+                </tr>
+                <tr style="background:#0a4c5a; color:white;">
+                    <th style="border:1px solid #ccc; padding:4px; text-align:center;">DATA</th><th style="border:1px solid #ccc; padding:4px; text-align:center;">VALUE</th>
+                    <th style="border:1px solid #ccc; padding:4px; text-align:center;">DATA</th><th style="border:1px solid #ccc; padding:4px; text-align:center;">VALUE</th>
+                    <th style="border:1px solid #ccc; padding:4px; text-align:center;">DATA</th><th style="border:1px solid #ccc; padding:4px; text-align:center;">VALUE</th>
+                    <th style="border:1px solid #ccc; padding:4px; text-align:center;">DATA</th><th style="border:1px solid #ccc; padding:4px; text-align:center;">VALUE</th>
+                    <th style="border:1px solid #ccc; padding:4px; text-align:center;">DATA</th><th style="border:1px solid #ccc; padding:4px; text-align:center;">VALUE</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr style="background:#fff; color:#333;">
+                    <td rowspan="3" style="border:1px solid #ccc; padding:4px; text-align:center; font-weight:bold;">Case 4</td>
+                    <td rowspan="3" style="border:1px solid #ccc; padding:4px;">1. SELECT 문 실행<br>(1건당 0.00005초...)</td>
+                    <td rowspan="3" style="border:1px solid #ccc; padding:4px; font-weight:bold;">Select 쿼리<br>(SQL_ID : 47kdtj...)</td>
+                    <td style="border:1px solid #ccc; padding:4px;">Executions</td><td style="border:1px solid #ccc; text-align:right; padding:4px;">10000</td>
+                    <td style="border:1px solid #ccc; padding:4px;">로깅 횟수</td><td style="border:1px solid #ccc; text-align:right; padding:4px; color:#d93025; font-weight:bold;">5</td>
+                    <td style="border:1px solid #ccc; padding:4px;">로깅 횟수</td><td style="border:1px solid #ccc; text-align:right; padding:4px; color:#d93025; font-weight:bold;">-</td>
+                    <td style="border:1px solid #ccc; padding:4px;">Execution Count</td><td style="border:1px solid #ccc; text-align:right; padding:4px; color:#1a73e8; font-weight:bold;">9998</td>
+                    <td style="border:1px solid #ccc; padding:4px;">Execution Count</td><td style="border:1px solid #ccc; text-align:right; padding:4px; color:#1a73e8; font-weight:bold;">-</td>
+                </tr>
+                <tr style="background:#fff; color:#333;">
+                    <td style="border:1px solid #ccc; padding:4px;">Elapsed Time (Sec)</td><td style="border:1px solid #ccc; text-align:right; padding:4px;">0.74</td>
+                    <td style="border:1px solid #ccc; padding:4px; background:#fafafa;"></td><td style="border:1px solid #ccc; padding:4px; background:#fafafa;"></td>
+                    <td style="border:1px solid #ccc; padding:4px; background:#fafafa;"></td><td style="border:1px solid #ccc; padding:4px; background:#fafafa;"></td>
+                    <td style="border:1px solid #ccc; padding:4px;">Elapsed Time (Sec)</td><td style="border:1px solid #ccc; text-align:right; padding:4px;">0.69</td>
+                    <td style="border:1px solid #ccc; padding:4px;">Elapsed Time (Sec)</td><td style="border:1px solid #ccc; text-align:right; padding:4px;">-</td>
+                </tr>
+                <tr style="background:#fff; color:#333;">
+                    <td style="border:1px solid #ccc; padding:4px;">Elapsed / Executions</td><td style="border:1px solid #ccc; text-align:right; padding:4px;">0.0000</td>
+                    <td style="border:1px solid #ccc; padding:4px;">로깅 1회당 Elapse 평균</td><td style="border:1px solid #ccc; text-align:right; padding:4px; color:#d93025; font-weight:bold;">0.01</td>
+                    <td style="border:1px solid #ccc; padding:4px;">로깅 1회당...</td><td style="border:1px solid #ccc; text-align:right; padding:4px; color:#d93025; font-weight:bold;">-</td>
+                    <td style="border:1px solid #ccc; padding:4px;">Elapsed / Executions</td><td style="border:1px solid #ccc; text-align:right; padding:4px;">0.0000</td>
+                    <td style="border:1px solid #ccc; padding:4px;">Elapsed / Executions</td><td style="border:1px solid #ccc; text-align:right; padding:4px;">-</td>
+                </tr>
+            </tbody>
+        </table>
+        <div style="padding:10px; font-size:12px; font-weight:bold; color:#0a4c5a;">
+            ※ 위 표는 UI 하단에 출력되는 실제 결괏값의 예시 모양(Mockup)입니다.
+        </div>
+    </div>
+    
+    <h4>📌 표 보는 방법 (핵심)</h4>
+    <p>실제 Target DB(V$SQL)의 지표 값과 수집 서버 내 데이터(VSQL_RTS, POL_RTS)를 나란히 배치하여 <strong>세로 3줄(Row 1,2,3) 단위로 1:1 비교 판단</strong>을 내릴 수 있습니다.</p>
+
+    <div class="step-box" style="border-left-color: #ea4335;">
+        <h4 style="margin-top:0; color:#ea4335;">💡 수집 불량(오류) 판별 방법</h4>
+        <p>1. <strong>수집 누락 현상 검증:</strong> 가장 윗줄(Row 1)을 확인했을 때 Target DB의 <code>Executions</code> 값이 10,000 인데, 우측 Repo DB(STAT_10MIN)의 <code>Execution Count</code> 값이 그에 한참 미치지 못하거나 '-' 인 경우 정상 수집이 안 된 것입니다.<br>
+        2. <strong>시간 오차 검증:</strong> 가장 아랫줄(Row 3)에서 Target DB의 평균 타임과 수집서버의 1회당 평균 타임에 심각한 간극이 벌어지면 시간 변환 로직 오류를 의심해야 합니다.</p>
+    </div>
+
+    <h4>📌 결과 표 마지막의 사후정리(Cleanup) 로그</h4>
+    <ul>
+        <li>표의 맨 아래에는 회색 박스로 <strong>Cleanup Log</strong>가 함께 출력됩니다.</li>
+        <li>여기에 <code>"SYS Purge & Drop SUCCESS"</code> 가 뜨면 정상적으로 임시 생성된 테이블과 메모리의 테스트 쿼리 흔적까지 완벽하게 정리된 것입니다.</li>
+    </ul>
+
+</div>
+
+</body>
+</html>
