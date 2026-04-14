@@ -58,6 +58,22 @@ def _append_log_line(file_path: str, payload: Dict[str, Any]) -> None:
         fp.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
 
+def _kb_to_mb(v: Any) -> Optional[float]:
+    try:
+        if v is None:
+            return None
+        return round(float(v) / 1024.0, 3)
+    except Exception:
+        return None
+
+
+def _fmt_ts(ts: int) -> str:
+    try:
+        return datetime.fromtimestamp(int(ts)).strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return ""
+
+
 def _collector_worker(session_key: str, end_ts: int, kwargs: Dict[str, Any]) -> None:
     """
     2시간 집계 세션 동안 주기적으로 snapshot을 수집해서 저장한다.
@@ -160,7 +176,7 @@ def _pid_fallback(ssh: _SSHSession, conf_name: str, daemon: str) -> Optional[str
     return pid or None
 
 
-def _read_pid_metrics(ssh: _SSHSession, pid: str) -> Tuple[Optional[float], Optional[float], Optional[int], str]:
+def _read_pid_metrics(ssh: _SSHSession, pid: str) -> Tuple[Optional[float], Optional[float], Optional[int], Optional[int], str]:
     cmd_specs = [
         (f"ps -p {pid} -o pid=,%cpu=,%mem=,rss=,comm= 2>/dev/null", "full"),
         (f"ps -p {pid} -o pid=,pcpu=,pmem=,rss=,comm= 2>/dev/null", "full"),
@@ -171,6 +187,7 @@ def _read_pid_metrics(ssh: _SSHSession, pid: str) -> Tuple[Optional[float], Opti
     best_cpu: Optional[float] = None
     best_mem: Optional[float] = None
     best_rss: Optional[int] = None
+    best_vsz: Optional[int] = None
     best_raw = ""
 
     for cmd, mode in cmd_specs:
@@ -192,7 +209,7 @@ def _read_pid_metrics(ssh: _SSHSession, pid: str) -> Tuple[Optional[float], Opti
             if raw:
                 best_raw = raw
         if best_cpu is not None and best_mem is not None and best_rss is not None:
-            return best_cpu, best_mem, best_rss, best_raw
+            return best_cpu, best_mem, best_rss, best_vsz, best_raw
 
     # OS별 컬럼 지원 편차가 크므로 항목별 단건 조회로 보강
     if best_cpu is None:
@@ -249,8 +266,8 @@ def _read_pid_metrics(ssh: _SSHSession, pid: str) -> Tuple[Optional[float], Opti
                 if not best_raw:
                     best_raw = line_ef
 
-    # 추가 메모리 fallback (RSS 없을 때 VSZ라도 표시)
-    if best_rss is None:
+    # VSZ(virtual mem) fallback
+    if best_vsz is None:
         for cmd in [
             f"ps -p {pid} -o vsz= 2>/dev/null",
             f"UNIX95=1 ps -p {pid} -o vsz= 2>/dev/null",
@@ -258,14 +275,14 @@ def _read_pid_metrics(ssh: _SSHSession, pid: str) -> Tuple[Optional[float], Opti
             out, _, _ = ssh.run(cmd)
             v = _first_number(out.strip())
             if v is not None:
-                best_rss = int(v)
+                best_vsz = int(v)
                 if not best_raw:
                     best_raw = "vsz fallback"
                 break
 
-    if best_cpu is not None or best_mem is not None or best_rss is not None:
-        return best_cpu, best_mem, best_rss, (best_raw or "partial cpu/mem data")
-    return None, None, None, "no cpu/mem data (ps format unsupported)"
+    if best_cpu is not None or best_mem is not None or best_rss is not None or best_vsz is not None:
+        return best_cpu, best_mem, best_rss, best_vsz, (best_raw or "partial cpu/mem data")
+    return None, None, None, None, "no cpu/mem data (ps format unsupported)"
 
 
 def _collect_snapshot(
@@ -314,8 +331,8 @@ def _collect_snapshot(
                 })
                 continue
 
-            cpu, mem, rss, raw = _read_pid_metrics(ssh, pid)
-            status = "pass" if (cpu is not None or mem is not None or rss is not None) else "skip"
+            cpu, mem, rss, vsz, raw = _read_pid_metrics(ssh, pid)
+            status = "pass" if (cpu is not None or mem is not None or rss is not None or vsz is not None) else "skip"
             row = {
                 "daemon": daemon,
                 "status": status,
@@ -323,6 +340,7 @@ def _collect_snapshot(
                 "cpu_pct": cpu,
                 "mem_pct": mem,
                 "rss_kb": rss,
+                "vsz_kb": vsz,
                 "evidence": raw,
                 "collected_at": now_ts,
             }
@@ -339,18 +357,24 @@ def _collect_snapshot(
                     "cpu_pct": cpu,
                     "mem_pct": mem,
                     "rss_kb": rss,
+                    "vsz_kb": vsz,
                 }
                 _STORE[key].append(sample)
                 try:
+                    log_payload = {
+                        "logged_at": _fmt_ts(now_ts),
+                        "host_ip": host_ip,
+                        "conf_name": resolved_conf,
+                        "daemon": daemon,
+                        "pid": str(pid),
+                        "cpu_pct": cpu,
+                        "mem_pct": mem,
+                        "real_mem_mb": _kb_to_mb(rss),
+                        "virtual_mem_mb": _kb_to_mb(vsz),
+                    }
                     _append_log_line(
                         meta["file_path"],
-                        {
-                            "ts": now_ts,
-                            "host_ip": host_ip,
-                            "conf_name": resolved_conf,
-                            "daemon": daemon,
-                            **sample,
-                        },
+                        log_payload,
                     )
                 except Exception:
                     # 파일 쓰기 실패는 조회 흐름을 중단하지 않음
@@ -455,8 +479,12 @@ def collect_cpu_mem_window(window_minutes: int = 120, **kwargs) -> Dict[str, Any
         cpu_avg, cpu_max = _agg([s.get("cpu_pct") for s in samples])
         mem_avg, mem_max = _agg([s.get("mem_pct") for s in samples])
         rss_avg, rss_max = _agg([s.get("rss_kb") for s in samples])
+        vsz_avg, vsz_max = _agg([s.get("vsz_kb") for s in samples])
         has_numeric = any(
-            (s.get("cpu_pct") is not None) or (s.get("mem_pct") is not None) or (s.get("rss_kb") is not None)
+            (s.get("cpu_pct") is not None)
+            or (s.get("mem_pct") is not None)
+            or (s.get("rss_kb") is not None)
+            or (s.get("vsz_kb") is not None)
             for s in samples
         )
         if has_numeric:
@@ -476,6 +504,8 @@ def collect_cpu_mem_window(window_minutes: int = 120, **kwargs) -> Dict[str, Any
             "mem_max_pct": mem_max,
             "rss_avg_kb": rss_avg,
             "rss_max_kb": rss_max,
+            "vsz_avg_kb": vsz_avg,
+            "vsz_max_kb": vsz_max,
         })
 
     overall = "pass" if pass_daemon_count > 0 else ("fail" if total_samples == 0 else "skip")

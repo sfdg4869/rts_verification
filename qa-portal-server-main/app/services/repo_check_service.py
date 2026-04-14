@@ -5,7 +5,7 @@ Repo DB 점검 서비스
 
 import time
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 
 def _step_result(name: str, status: str, evidence: str, duration_ms: int) -> Dict[str, Any]:
@@ -151,6 +151,7 @@ def run_repo_check(
     recent_minutes: int = 30,
     partition_date: Optional[Any] = None,
     sql_id: str = "3b8uva7q2cf5a",
+    progress_callback: Optional[Callable[[int, int, str, str], None]] = None,
 ) -> Dict[str, Any]:
     from app.shared_db import get_connection, release_connection, get_db_config, _infer_db_engine
 
@@ -181,17 +182,31 @@ def run_repo_check(
         conn = get_connection("repo")
         cursor = conn.cursor()
 
+        partition_key_min = _resolve_partition_key_min(cursor, engine, partition_date, sql_id)
+        result["partition_key_min"] = partition_key_min
+
         # 1) APM_TOP_OS_PROCESS_LIST 누락 여부
         t0 = time.time()
         try:
-            exists = _has_rows(cursor, engine, "APM_TOP_OS_PROCESS_LIST", "", [])
-            sample = _fetch_full_rows(cursor, engine, "APM_TOP_OS_PROCESS_LIST", "", [], limit=10)
+            where_sql = f" WHERE partition_key >= {partition_key_min}"
+            params = []
+            if db_id is not None:
+                if engine == "oracle":
+                    where_sql += " AND db_id = :1"
+                else:
+                    where_sql += " AND db_id = %s"
+                params = [db_id]
+
+            exists = _has_rows(cursor, engine, "APM_TOP_OS_PROCESS_LIST", where_sql, params)
+            sample = _fetch_full_rows(cursor, engine, "APM_TOP_OS_PROCESS_LIST", where_sql, params, limit=10)
             status = "pass" if exists else "fail"
             evidence = f"rows exists={exists}\nrows:\n{_fmt_rows(sample)}"
             step = _step_result("repo_apm_top_os_process_list_no_missing", status, evidence, _elapsed_ms(t0))
         except Exception as e:
             step = _step_result("repo_apm_top_os_process_list_no_missing", "fail", str(e), _elapsed_ms(t0))
         result["steps"].append(step)
+        if progress_callback:
+            progress_callback(len(result["steps"]), 6, step["step"], step["status"])
 
         # 2) ORA_SQL_ELAPSE elapsed>=1 존재 여부
         t0 = time.time()
@@ -207,15 +222,25 @@ def run_repo_check(
                 )
             else:
                 elapsed_num = _numeric_expr(engine, elapsed_col)
-                where_sql = f" WHERE {elapsed_num} >= 1"
-                exists = _has_rows(cursor, engine, "ORA_SQL_ELAPSE", where_sql, [])
-                sample = _fetch_full_rows(cursor, engine, "ORA_SQL_ELAPSE", where_sql, [], limit=10)
+                where_sql = f" WHERE partition_key >= {partition_key_min} AND {elapsed_num} >= 1"
+                params = []
+                if db_id is not None:
+                    if engine == "oracle":
+                        where_sql += " AND db_id = :1"
+                    else:
+                        where_sql += " AND db_id = %s"
+                    params = [db_id]
+                
+                exists = _has_rows(cursor, engine, "ORA_SQL_ELAPSE", where_sql, params)
+                sample = _fetch_full_rows(cursor, engine, "ORA_SQL_ELAPSE", where_sql, params, limit=10)
                 status = "pass" if exists else "fail"
                 evidence = f"elapsed>=1 exists={exists} (elapsed_col={elapsed_col})\nrows:\n{_fmt_rows(sample)}"
                 step = _step_result("repo_ora_sql_elapse_over_1s_logged", status, evidence, _elapsed_ms(t0))
         except Exception as e:
             step = _step_result("repo_ora_sql_elapse_over_1s_logged", "fail", str(e), _elapsed_ms(t0))
         result["steps"].append(step)
+        if progress_callback:
+            progress_callback(len(result["steps"]), 6, step["step"], step["status"])
 
         # 3) ORA_SQL_STAT_10MIN elapsed>=50 존재 여부
         t0 = time.time()
@@ -231,15 +256,25 @@ def run_repo_check(
                 )
             else:
                 elapsed_num = _numeric_expr(engine, elapsed_col)
-                where_sql = f" WHERE {elapsed_num} >= 50"
-                exists = _has_rows(cursor, engine, "ORA_SQL_STAT_10MIN", where_sql, [])
-                sample = _fetch_full_rows(cursor, engine, "ORA_SQL_STAT_10MIN", where_sql, [], limit=10)
+                where_sql = f" WHERE partition_key >= {partition_key_min} AND {elapsed_num} >= 50"
+                params = []
+                if db_id is not None:
+                    if engine == "oracle":
+                        where_sql += " AND db_id = :1"
+                    else:
+                        where_sql += " AND db_id = %s"
+                    params = [db_id]
+                
+                exists = _has_rows(cursor, engine, "ORA_SQL_STAT_10MIN", where_sql, params)
+                sample = _fetch_full_rows(cursor, engine, "ORA_SQL_STAT_10MIN", where_sql, params, limit=10)
                 status = "pass" if exists else "fail"
                 evidence = f"elapsed>=50 exists={exists} (elapsed_col={elapsed_col})\nrows:\n{_fmt_rows(sample)}"
                 step = _step_result("repo_ora_sql_stat_10min_over_50s_only", status, evidence, _elapsed_ms(t0))
         except Exception as e:
             step = _step_result("repo_ora_sql_stat_10min_over_50s_only", "fail", str(e), _elapsed_ms(t0))
         result["steps"].append(step)
+        if progress_callback:
+            progress_callback(len(result["steps"]), 6, step["step"], step["status"])
 
         # 4) ORA_SQL_ELAPSE elapsed>=1 + execution(행수)>=10
         t0 = time.time()
@@ -255,9 +290,20 @@ def run_repo_check(
                 )
             else:
                 elapsed_num = _numeric_expr(engine, elapsed_col)
-                ge1_where = f" WHERE {elapsed_num} >= 1"
-                has_elapsed_ge1 = _has_rows(cursor, engine, "ORA_SQL_ELAPSE", ge1_where, [])
-                sample = _fetch_full_rows(cursor, engine, "ORA_SQL_ELAPSE", "", [], limit=10)
+                ge1_where = f" WHERE partition_key >= {partition_key_min} AND {elapsed_num} >= 1"
+                base_where = f" WHERE partition_key >= {partition_key_min}"
+                params = []
+                if db_id is not None:
+                    if engine == "oracle":
+                        ge1_where += " AND db_id = :1"
+                        base_where += " AND db_id = :1"
+                    else:
+                        ge1_where += " AND db_id = %s"
+                        base_where += " AND db_id = %s"
+                    params = [db_id]
+                
+                has_elapsed_ge1 = _has_rows(cursor, engine, "ORA_SQL_ELAPSE", ge1_where, params)
+                sample = _fetch_full_rows(cursor, engine, "ORA_SQL_ELAPSE", base_where, params, limit=10)
                 has_exec_10 = len(sample) >= 10
                 status = "pass" if (has_elapsed_ge1 and has_exec_10) else "fail"
                 evidence = (
@@ -268,33 +314,38 @@ def run_repo_check(
         except Exception as e:
             step = _step_result("repo_ora_sql_elapse_over_1s_elapsed_execution_logged", "fail", str(e), _elapsed_ms(t0))
         result["steps"].append(step)
-
-        partition_key_min = _resolve_partition_key_min(cursor, engine, partition_date, sql_id)
-        result["partition_key_min"] = partition_key_min
+        if progress_callback:
+            progress_callback(len(result["steps"]), 6, step["step"], step["status"])
 
         # 5) ORA_SQL_ELAPSE 대상 SQL 조회
         t0 = time.time()
         try:
             if engine == "oracle":
+                db_filter = " AND db_id = :3" if db_id is not None else ""
                 sql = (
                     "SELECT * FROM ("
                     "  SELECT db_id, time, sql_id, sql_hash, sql_addr, sql_plan_hash, "
                     "         (ELAPSE/1000) AS elapse_ms_to_sec "
                     "  FROM ora_sql_elapse "
-                    "  WHERE partition_key > :1 AND sql_id = :2 "
+                    f"  WHERE partition_key > :1 AND sql_id = :2{db_filter} "
                     "  ORDER BY db_id, time DESC"
                     ") WHERE ROWNUM <= 200"
                 )
                 params = [partition_key_min, sql_id]
+                if db_id is not None:
+                    params.append(db_id)
             else:
+                db_filter = " AND db_id = %s" if db_id is not None else ""
                 sql = (
                     "SELECT db_id, time, sql_id, sql_hash, sql_addr, sql_plan_hash, "
                     "       (ELAPSE/1000.0) AS elapse_ms_to_sec "
                     "FROM ora_sql_elapse "
-                    "WHERE partition_key > %s AND sql_id = %s "
+                    f"WHERE partition_key > %s AND sql_id = %s{db_filter} "
                     "ORDER BY db_id, time DESC LIMIT 200"
                 )
                 params = [partition_key_min, sql_id]
+                if db_id is not None:
+                    params.append(db_id)
 
             cursor.execute(sql, params)
             rows = _fetch_rows_with_columns(cursor, limit=50)
@@ -307,11 +358,14 @@ def run_repo_check(
         except Exception as e:
             step = _step_result("repo_ora_sql_elapse_target_sql_collect_check", "fail", str(e), _elapsed_ms(t0))
         result["steps"].append(step)
+        if progress_callback:
+            progress_callback(len(result["steps"]), 6, step["step"], step["status"])
 
         # 6) ORA_SQL_STAT_10MIN 대상 SQL 조회
         t0 = time.time()
         try:
             if engine == "oracle":
+                db_filter = " AND db_id = :3" if db_id is not None else ""
                 sql = (
                     "SELECT * FROM ("
                     "  SELECT db_id, time, sql_id, sql_hash, sql_addr, sql_plan_hash, "
@@ -321,12 +375,15 @@ def run_repo_check(
                     "               THEN (elapsed_time/execution_count)/100 "
                     "               ELSE NULL END) AS per_elapse_sec "
                     "  FROM ora_sql_stat_10min "
-                    "  WHERE partition_key > :1 AND sql_id = :2 "
+                    f"  WHERE partition_key > :1 AND sql_id = :2{db_filter} "
                     "  ORDER BY db_id, time DESC"
                     ") WHERE ROWNUM <= 200"
                 )
                 params = [partition_key_min, sql_id]
+                if db_id is not None:
+                    params.append(db_id)
             else:
+                db_filter = " AND db_id = %s" if db_id is not None else ""
                 sql = (
                     "SELECT db_id, time, sql_id, sql_hash, sql_addr, sql_plan_hash, "
                     "       execution_count, "
@@ -335,10 +392,12 @@ def run_repo_check(
                     "             THEN (elapsed_time/execution_count)/100.0 "
                     "             ELSE NULL END) AS per_elapse_sec "
                     "FROM ora_sql_stat_10min "
-                    "WHERE partition_key > %s AND sql_id = %s "
+                    f"WHERE partition_key > %s AND sql_id = %s{db_filter} "
                     "ORDER BY db_id, time DESC LIMIT 200"
                 )
                 params = [partition_key_min, sql_id]
+                if db_id is not None:
+                    params.append(db_id)
 
             cursor.execute(sql, params)
             rows = _fetch_rows_with_columns(cursor, limit=50)
@@ -351,6 +410,8 @@ def run_repo_check(
         except Exception as e:
             step = _step_result("repo_ora_sql_stat_10min_target_sql_collect_check", "fail", str(e), _elapsed_ms(t0))
         result["steps"].append(step)
+        if progress_callback:
+            progress_callback(len(result["steps"]), 6, step["step"], step["status"])
 
         if any(s["status"] == "fail" for s in result["steps"]):
             result["overall_status"] = "fail"

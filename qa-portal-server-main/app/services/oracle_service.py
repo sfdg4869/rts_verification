@@ -7,6 +7,10 @@ import logging
 import threading
 
 import oracledb
+
+# Thick 모드(Instant Client)는 app.create_app()에서 ORACLE_CLIENT_LIB_DIR 등으로 1회 초기화.
+# Docker/Linux에서는 기본적으로 Thin 모드(TCP)로 연결합니다.
+
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Tuple
 from app.services.dg_password_service import decrypt_dg_password
@@ -137,6 +141,12 @@ class OracleService:
         except Exception as e:
             _logger.error(f"Oracle 연결 실패: {e}")
             return None
+
+    def connect_or_raise(self) -> oracledb.Connection:
+        """풀에서 커넥션을 가져오며, 실패 시 예외를 그대로 올립니다(진단·API 오류 메시지용)."""
+        dsn, user, password = self._get_credentials()
+        pool = _get_or_create_pool(dsn, user, password)
+        return pool.acquire()
 
     def release_connection(self, conn: oracledb.Connection) -> None:
         """

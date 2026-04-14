@@ -1,9 +1,12 @@
 
 # Flask app factory and route bootstrap
-from flask import Flask
+from flask import Flask, redirect, send_file
 from flasgger import Swagger
 from flask_cors import CORS
 import os
+
+# 프로젝트 루트 (app.py, rts_check.html 위치). 패키지는 app/ 아래이므로 한 단계 위.
+_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 # Blueprint registry
 from app.routes import blueprints
@@ -65,13 +68,18 @@ def _auto_load_db_setup():
 
 
 def _init_oracle_client_once():
-	"""Oracle Thick 모드 초기화 (프로세스 당 1회)."""
+	"""Oracle Thick 모드 초기화 (프로세스 당 1회). 실패 시 Thin 모드(TCP)로 동작."""
 	import oracledb
+
+	lib_dir = (os.environ.get("ORACLE_CLIENT_LIB_DIR") or "").strip()
 	try:
-		oracledb.init_oracle_client()
+		if lib_dir and os.path.isdir(lib_dir):
+			oracledb.init_oracle_client(lib_dir=lib_dir)
+		else:
+			oracledb.init_oracle_client()
 	except Exception as e:
 		if "DPY-3015" not in str(e):
-			print(f"[WARNING] Oracle client init failed: {e}")
+			print(f"[WARNING] Oracle client init failed (Thin 모드 사용): {e}")
 
 
 def create_app():
@@ -88,5 +96,13 @@ def create_app():
 	# Register all blueprints
 	for bp in blueprints:
 		app.register_blueprint(bp)
+
+	@app.route("/")
+	def _root():
+		return redirect("/rts-check")
+
+	@app.route("/rts-check")
+	def _rts_check_ui():
+		return send_file(os.path.join(_REPO_ROOT, "rts_check.html"))
 
 	return app

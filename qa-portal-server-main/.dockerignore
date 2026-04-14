@@ -1,0 +1,14 @@
+.git
+.github
+__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+.venv
+venv
+.env
+*.md
+chart_exports
+data_collection_reports
+*.png
+terminals

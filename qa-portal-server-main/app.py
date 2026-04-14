@@ -1,13 +1,7 @@
-# app.py
+# app.py — 로컬 개발용 진입점 (라우트는 app.create_app 에 등록됨)
 from app import create_app
-from flask import send_file
-import os
 
 app = create_app()
-
-@app.route('/rts-check')
-def rts_check_ui():
-    return send_file(os.path.join(os.path.dirname(__file__), 'rts_check.html'))
 
 if __name__ == '__main__':
     print('RTS Check UI:  http://localhost:5000/rts-check')

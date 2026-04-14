@@ -5,8 +5,48 @@ MaxGauge RTS 데몬(rts/sndf/obsd)의 상태를 SSH로 점검하는 API.
 
 from flask import Blueprint, jsonify, request
 from flasgger import swag_from
+import threading
+import time
+import uuid
+import os
+import json
 
 bp = Blueprint("rts_check", __name__, url_prefix="/api/v2/rts/check")
+_REPO_JOB_LOCK = threading.Lock()
+_REPO_JOBS = {}
+_REPO_JOB_STORE_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(__file__)),
+    "resource",
+    "repo_jobs_state.json",
+)
+
+
+def _persist_repo_jobs() -> None:
+    os.makedirs(os.path.dirname(_REPO_JOB_STORE_PATH), exist_ok=True)
+    tmp = _REPO_JOB_STORE_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(_REPO_JOBS, f, ensure_ascii=False)
+    try:
+        os.replace(tmp, _REPO_JOB_STORE_PATH)
+    except OSError:
+        # Windows: 대상 파일이 다른 프로세스에 잠겨있으면 직접 덮어쓰기
+        try:
+            os.remove(_REPO_JOB_STORE_PATH)
+        except OSError:
+            pass
+        os.replace(tmp, _REPO_JOB_STORE_PATH)
+
+
+def _load_repo_jobs_from_disk() -> None:
+    if not os.path.exists(_REPO_JOB_STORE_PATH):
+        return
+    try:
+        with open(_REPO_JOB_STORE_PATH, "r", encoding="utf-8") as f:
+            loaded = json.load(f)
+        if isinstance(loaded, dict):
+            _REPO_JOBS.update(loaded)
+    except Exception:
+        return
 
 
 _RUN_SPEC = {
@@ -310,6 +350,12 @@ def set_repo_from_mongodb():
     if not doc:
         return jsonify({"error": f"config_id '{config_id}' not found"}), 400
 
+    stype = (
+        doc.get("service_type")
+        or doc.get("serviceType")
+        or doc.get("type")
+        or ""
+    )
     repo_cfg = {
         "host": doc.get("host", ""),
         "port": int(doc.get("db_port", doc.get("port", 1521))),
@@ -317,7 +363,7 @@ def set_repo_from_mongodb():
         "password": doc.get("db_password", doc.get("password", "")),
         "database": doc.get("database", doc.get("service", "")),
         "service": doc.get("service", doc.get("database", "")),
-        "service_type": doc.get("service_type", ""),
+        "service_type": stype,
         "db_type": doc.get("db_type", "oracle"),
     }
 
@@ -400,10 +446,11 @@ def set_repo_direct():
 })
 def get_repo_status():
     """현재 Repo DB 설정 상태 반환"""
-    from app.shared_db import get_db_config
+    from app.shared_db import get_db_config, _infer_db_engine
 
     config = get_db_config("repo")
     if config:
+        engine = _infer_db_engine(config, "postgresql")
         return jsonify({
             "connected": True,
             "host": config.get("host", ""),
@@ -411,6 +458,8 @@ def get_repo_status():
             "database": config.get("database", config.get("service", "")),
             "user": config.get("user", config.get("db_user", "")),
             "db_type": config.get("db_type", ""),
+            "engine": engine,
+            "schema_name": (config.get("schema_name") or "").strip(),
         }), 200
     return jsonify({"connected": False}), 200
 
@@ -538,6 +587,87 @@ def run_repo_check_api():
         return jsonify({"error": str(e)}), 500
 
 
+@bp.route("/run-repo-job", methods=["POST"])
+def run_repo_job_api():
+    """Repo DB 점검 비동기 job 시작"""
+    from app.services.repo_check_service import run_repo_check
+
+    data = request.get_json(silent=True) or {}
+    db_id = data.get("db_id")
+    recent_minutes = int(data.get("recent_minutes", 30))
+    partition_date = data.get("partition_date")
+    sql_id = str(data.get("sql_id", "3b8uva7q2cf5a") or "3b8uva7q2cf5a").strip()
+
+    job_id = str(uuid.uuid4())
+    with _REPO_JOB_LOCK:
+        _REPO_JOBS[job_id] = {
+            "job_id": job_id,
+            "status": "running",
+            "started_at": int(time.time()),
+            "completed_steps": 0,
+            "total_steps": 6,
+            "current_step": "",
+            "current_step_status": "",
+            "progress_pct": 0,
+            "result": None,
+            "error": None,
+        }
+        _persist_repo_jobs()
+        _persist_repo_jobs()
+
+    def _worker():
+        def _progress(done: int, total: int, step_name: str, step_status: str):
+            with _REPO_JOB_LOCK:
+                job = _REPO_JOBS.get(job_id)
+                if not job:
+                    return
+                job["completed_steps"] = int(done)
+                job["total_steps"] = int(total)
+                job["current_step"] = step_name
+                job["current_step_status"] = step_status
+                job["progress_pct"] = int((done / total) * 100) if total else 0
+                _persist_repo_jobs()
+
+        try:
+            result = run_repo_check(
+                db_id=db_id,
+                recent_minutes=recent_minutes,
+                partition_date=partition_date,
+                sql_id=sql_id,
+                progress_callback=_progress,
+            )
+            with _REPO_JOB_LOCK:
+                job = _REPO_JOBS.get(job_id)
+                if job:
+                    job["status"] = "done"
+                    job["completed_steps"] = 6
+                    job["progress_pct"] = 100
+                    job["result"] = result
+                    _persist_repo_jobs()
+        except Exception as e:
+            with _REPO_JOB_LOCK:
+                job = _REPO_JOBS.get(job_id)
+                if job:
+                    job["status"] = "error"
+                    job["error"] = str(e)
+                    _persist_repo_jobs()
+
+    threading.Thread(target=_worker, daemon=True, name=f"repo-check-job-{job_id[:8]}").start()
+    return jsonify({"job_id": job_id, "status": "running"}), 202
+
+
+@bp.route("/run-repo-job/<job_id>", methods=["GET"])
+def run_repo_job_status_api(job_id: str):
+    """Repo DB 점검 비동기 job 상태/결과 조회"""
+    with _REPO_JOB_LOCK:
+        # 항상 disk에서 최신 상태를 읽어 멀티 워커 간 상태 불일치를 방지한다.
+        _load_repo_jobs_from_disk()
+        job = _REPO_JOBS.get(job_id)
+        if not job:
+            return jsonify({"error": "job not found"}), 404
+        return jsonify(job), 200
+
+
 @bp.route("/run-target-sql", methods=["POST"])
 @swag_from(_RUN_TARGET_SQL_SPEC)
 def run_target_sql_api():
@@ -555,6 +685,177 @@ def run_target_sql_api():
         return jsonify(result), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@bp.route("/run-repo-new", methods=["POST"])
+def run_repo_new_api():
+    from app.services.new_repo_check_service import run_new_repo_check
+    from app.services.target_sql_test_service import _get_apm_db_row_with_secret
+    
+    data = request.get_json(silent=True) or {}
+    db_id = data.get("db_id")
+    target_cfg = data.get("target_config")
+    sys_password = data.get("sys_password")
+    case4_loops = int(data.get("case4_loops", 200))
+    case5_loops = int(data.get("case5_loops", 30))
+    case5_rows = int(data.get("case5_rows", 50000))
+    repo_db_id_list = data.get("repo_db_id_list")
+    repo_partition_date = data.get("repo_partition_date")
+    repo_logging_time = data.get("repo_logging_time")
+    repo_schema_name = (data.get("schema_name") or data.get("repo_pg_schema") or "").strip() or None
+
+    if not db_id and not target_cfg:
+        return jsonify({"error": "db_id or target_config is required"}), 400
+
+    try:
+        if not target_cfg or not target_cfg.get("password"):
+            ok, row, err = _get_apm_db_row_with_secret(int(db_id))
+            if not ok or not row:
+                return jsonify({"error": err}), 400
+            
+            if not target_cfg:
+                target_cfg = {
+                    "host": row["host_ip"],
+                    "port": row["lsnr_port"],
+                    "user": row["db_user"],
+                    "password": row["db_password"],
+                    "sid": row["sid"],
+                    "instance_name": row["instance_name"]
+                }
+            else:
+                target_cfg["password"] = row["db_password"]
+
+        result = run_new_repo_check(
+            int(db_id),
+            target_cfg,
+            sys_password,
+            case4_loops=case4_loops,
+            case5_loops=case5_loops,
+            case5_rows=case5_rows,
+            repo_db_id_list=repo_db_id_list,
+            repo_partition_date=repo_partition_date,
+            repo_logging_time=repo_logging_time,
+            repo_schema_name=repo_schema_name,
+        )
+        return jsonify(result), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route("/run-repo-new-job", methods=["POST"])
+def run_repo_new_job_api():
+    """Repo 신규 점검 비동기 job 시작"""
+    from app.services.new_repo_check_service import run_new_repo_check
+    from app.services.target_sql_test_service import _get_apm_db_row_with_secret
+
+    data = request.get_json(silent=True) or {}
+    db_id = data.get("db_id")
+    target_cfg = data.get("target_config")
+    sys_password = data.get("sys_password")
+    case4_loops = int(data.get("case4_loops", 200))
+    case5_loops = int(data.get("case5_loops", 30))
+    case5_rows = int(data.get("case5_rows", 50000))
+    repo_db_id_list = data.get("repo_db_id_list")
+    repo_partition_date = data.get("repo_partition_date")
+    repo_logging_time = data.get("repo_logging_time")
+    repo_schema_name = (data.get("schema_name") or data.get("repo_pg_schema") or "").strip() or None
+
+    if not db_id and not target_cfg:
+        return jsonify({"error": "db_id or target_config is required"}), 400
+
+    job_id = str(uuid.uuid4())
+    with _REPO_JOB_LOCK:
+        _REPO_JOBS[job_id] = {
+            "job_id": job_id,
+            "type": "repo_new",
+            "status": "running",
+            "started_at": int(time.time()),
+            "completed_steps": 0,
+            "total_steps": 6,
+            "current_step": "",
+            "current_step_status": "",
+            "progress_pct": 0,
+            "result": None,
+            "error": None,
+        }
+        # Multi-worker: persist immediately so status GET can load this job.
+        _persist_repo_jobs()
+
+    def _worker():
+        try:
+            resolved_target_cfg = target_cfg
+            resolved_db_id = int(db_id) if db_id else None
+            if not resolved_target_cfg or not resolved_target_cfg.get("password"):
+                ok, row, err = _get_apm_db_row_with_secret(int(resolved_db_id))
+                if not ok or not row:
+                    raise RuntimeError(err)
+                if not resolved_target_cfg:
+                    resolved_target_cfg = {
+                        "host": row["host_ip"],
+                        "port": row["lsnr_port"],
+                        "user": row["db_user"],
+                        "password": row["db_password"],
+                        "sid": row["sid"],
+                        "instance_name": row["instance_name"],
+                    }
+                else:
+                    resolved_target_cfg["password"] = row["db_password"]
+
+            def _progress(done: int, total: int, step_name: str, step_status: str):
+                with _REPO_JOB_LOCK:
+                    job = _REPO_JOBS.get(job_id)
+                    if not job:
+                        return
+                    job["completed_steps"] = int(done)
+                    job["total_steps"] = int(total)
+                    job["current_step"] = step_name
+                    job["current_step_status"] = step_status
+                    job["progress_pct"] = int((done / total) * 100) if total else 0
+                    _persist_repo_jobs()
+
+            result = run_new_repo_check(
+                int(resolved_db_id),
+                resolved_target_cfg,
+                sys_password,
+                progress_callback=_progress,
+                case4_loops=case4_loops,
+                case5_loops=case5_loops,
+                case5_rows=case5_rows,
+                repo_db_id_list=repo_db_id_list,
+                repo_partition_date=repo_partition_date,
+                repo_logging_time=repo_logging_time,
+                repo_schema_name=repo_schema_name,
+            )
+            with _REPO_JOB_LOCK:
+                job = _REPO_JOBS.get(job_id)
+                if job:
+                    job["status"] = "done"
+                    job["completed_steps"] = 6
+                    job["progress_pct"] = 100
+                    job["result"] = result
+                    _persist_repo_jobs()
+        except Exception as e:
+            with _REPO_JOB_LOCK:
+                job = _REPO_JOBS.get(job_id)
+                if job:
+                    job["status"] = "error"
+                    job["error"] = str(e)
+                    _persist_repo_jobs()
+
+    threading.Thread(target=_worker, daemon=True, name=f"repo-new-job-{job_id[:8]}").start()
+    return jsonify({"job_id": job_id, "status": "running"}), 202
+
+
+@bp.route("/run-repo-new-job/<job_id>", methods=["GET"])
+def run_repo_new_job_status_api(job_id: str):
+    """Repo 신규 점검 비동기 job 상태/결과 조회"""
+    with _REPO_JOB_LOCK:
+        # 항상 disk에서 최신 상태를 읽어 멀티 워커 간 상태 불일치를 방지한다.
+        _load_repo_jobs_from_disk()
+        job = _REPO_JOBS.get(job_id)
+        if not job:
+            return jsonify({"error": "job not found"}), 404
+        return jsonify(job), 200
 
 
 @bp.route("/cpu-mem/snapshot", methods=["POST"])

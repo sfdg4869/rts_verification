@@ -172,10 +172,11 @@ def _build_oracle_dsn(config: Dict[str, Any]) -> str:
 
 def _connect_oracle_db(config: Dict[str, Any]):
     from app.services.oracle_service import OracleService
-    conn = OracleService(config).connect()
-    if conn is None:
-        raise ValueError("Oracle 연결 실패")
-    return conn
+
+    try:
+        return OracleService(config).connect_or_raise()
+    except Exception as e:
+        raise ValueError(f"Oracle 연결 실패: {e}") from e
 
 
 def set_db_config(db_type, config):
@@ -312,6 +313,10 @@ def release_connection(db_type, connection):
                 'password': config.get('password') or config.get('db_password') or '',
             }
             PostgreSQLService(normalized).release_connection(connection)
+            return
+        if engine == 'oracle':
+            from app.services.oracle_service import OracleService
+            OracleService(config).release_connection(connection)
             return
     try:
         connection.close()

@@ -439,7 +439,7 @@ input::placeholder { color: var(--theme-text-muted); }
       </div>
     </div>
     <div class="btn-row">
-      <button class="btn btn-secondary" id="btnRunTargetSql" disabled>Target 쿼리 실행(3개)</button>
+      <button class="btn btn-secondary" id="btnRunTargetSql" disabled>Target 점검 실행</button>
       <span id="targetSqlStatus" class="hidden"></span>
     </div>
   </div>
@@ -469,10 +469,31 @@ input::placeholder { color: var(--theme-text-muted); }
     <div class="btn-row">
       <button class="btn btn-primary" id="btnRun" disabled>Target 점검 실행</button>
       <button class="btn btn-primary" id="btnRunRepo">Repo 점검 실행</button>
+      <button class="btn btn-primary" id="btnRunRepoNew" style="background:#0a3a40;">Repo 점검 항목_신규</button>
+      <input type="password" id="sysPassword" placeholder="SYS 비밀번호(선택)" style="width: 160px;">
       <span id="runStatus" class="hidden"></span>
     </div>
-    <div class="status-msg" style="color:var(--text2);margin-top:8px">
-      Repo 점검 실행은 <b>Step 1 Repo DB 연결값</b>만 사용합니다.
+    <div class="field-grid" style="margin-top:8px">
+      <div class="field" id="repoStep5OracleWrap">
+        <label>Repo db_id list (Oracle Repo용)</label>
+        <input id="repoDbIdList" placeholder="예: 255 또는 567,569 (비우면 Target db_id)">
+      </div>
+      <div class="field" id="repoStep5PgWrap">
+        <label>Repo schema_name (PostgreSQL Repo용)</label>
+        <input id="repoSchemaName" placeholder="예: public 또는 l11204_25fn_p2 (비우면 Repo 연결의 schema_name)">
+      </div>
+      <div class="field">
+        <label>Repo Partition Date (선택)</label>
+        <input id="repoPartitionDate" placeholder="예: 260413 (YYMMDD)">
+      </div>
+      <div class="field">
+        <label>Repo Logging Time (선택)</label>
+        <input id="repoLoggingTime" placeholder="예: 2026-04-13 12:30:00">
+      </div>
+    </div>
+    <div id="repoStep5BranchHint" class="status-msg" style="color:var(--text2);margin-top:6px;font-size:12px"></div>
+    <div class="status-msg" style="color:var(--text2);margin-top:4px">
+      <b>분기</b>: Step 1에서 연결한 Repo가 <b>Oracle</b>이면 <code>db_id list</code>만, <b>PostgreSQL</b>이면 <code>schema_name</code>만 이 구역에 표시됩니다. 파티션일·로깅시각은 공통입니다.
     </div>
   </div>
 
@@ -505,9 +526,51 @@ const API_MONGO = '/api/v1';
 let selectedRow = null;
 let repoReady = false;
 let selectedMongoId = null;
+/** Repo 엔진(소문자). Step 5 입력 분기에 사용: oracle | postgresql */
+let repoStep5Engine = '';
 const THEME_KEY = 'rts-check-theme';
 
 const $ = id => document.getElementById(id);
+
+function syncRepoStep5FieldsForEngine(engine) {
+  const eng = String(engine || '').toLowerCase();
+  repoStep5Engine = eng;
+  const oraIn = $('repoDbIdList');
+  const pgIn = $('repoSchemaName');
+  const oraWrap = $('repoStep5OracleWrap');
+  const pgWrap = $('repoStep5PgWrap');
+  const hint = $('repoStep5BranchHint');
+  const isOracle = eng === 'oracle';
+  const isPg = eng === 'postgresql' || eng === 'postgres';
+
+  if (oraIn) {
+    oraIn.disabled = false;
+    oraIn.readOnly = false;
+    oraIn.title = 'Oracle Repo Step5: repo_db_id_list로 전송됩니다.';
+  }
+  if (pgIn) {
+    pgIn.disabled = false;
+    pgIn.readOnly = false;
+    pgIn.title = 'PostgreSQL Repo Step5: schema_name으로 전송됩니다.';
+  }
+  if (oraWrap) {
+    oraWrap.classList.toggle('hidden', !isOracle);
+    oraWrap.style.opacity = '';
+  }
+  if (pgWrap) {
+    pgWrap.classList.toggle('hidden', !isPg);
+    pgWrap.style.opacity = '';
+  }
+  if (hint) {
+    if (isOracle) {
+      hint.innerHTML = '<b>Step5 분기</b>: Repo = <b>Oracle</b> → 아래 <b>db_id list</b>만 입력하면 됩니다. (<code>repo_db_id_list</code>로 전송)';
+    } else if (isPg) {
+      hint.innerHTML = '<b>Step5 분기</b>: Repo = <b>PostgreSQL</b> → 아래 <b>schema_name</b>만 입력하면 됩니다. (<code>schema_name</code>으로 전송)';
+    } else {
+      hint.innerHTML = '<b>Step5 분기</b>: Repo 엔진을 알 수 없습니다. <b>Step 1에서 Repo DB를 연결</b>하면 Oracle이면 db_id list · PostgreSQL이면 schema_name 입력란이 나타납니다.';
+    }
+  }
+}
 
 function applyTheme(theme) {
   const isLight = theme === 'light';
@@ -550,19 +613,28 @@ async function loadRepoStatus() {
     const d = await res.json();
 
     if (d.connected) {
+      const eng = (d.engine || d.db_type || '').toLowerCase();
+      syncRepoStep5FieldsForEngine(eng);
+      const pgIn = $('repoSchemaName');
+      if (pgIn && d.schema_name && !String(pgIn.value || '').trim()) {
+        pgIn.value = d.schema_name;
+      }
       $('repoStatus').innerHTML = `<div class="repo-info">
         <span class="badge badge-connected">CONNECTED</span>
-        <span>Type: <span class="val">${d.db_type || '-'}</span></span>
-        <span>Host: <span class="val">${d.host}:${d.port}</span></span>
-        <span>DB: <span class="val">${d.database || '-'}</span></span>
-        <span>User: <span class="val">${d.user || '-'}</span></span>
+        <span>Engine: <span class="val">${escHtml(d.engine || d.db_type || '-')}</span></span>
+        <span>Type: <span class="val">${escHtml(d.db_type || '-')}</span></span>
+        <span>Host: <span class="val">${escHtml(d.host)}:${escHtml(String(d.port))}</span></span>
+        <span>DB: <span class="val">${escHtml(d.database || '-')}</span></span>
+        <span>User: <span class="val">${escHtml(d.user || '-')}</span></span>
       </div>`;
       setRepoReady(true);
     } else {
+      syncRepoStep5FieldsForEngine('');
       $('repoStatus').innerHTML = `<div class="repo-info"><span class="badge badge-disconnected">NOT CONNECTED</span><span>Repo DB를 설정해주세요</span></div>`;
       setRepoReady(false);
     }
   } catch (e) {
+    syncRepoStep5FieldsForEngine('');
     $('repoStatus').innerHTML = `<div class="repo-info"><span class="badge badge-disconnected">ERROR</span><span>${e.message}</span></div>`;
     setRepoReady(false);
   }
@@ -847,25 +919,56 @@ $('btnRunRepo').onclick = async () => {
     await loadRepoStatus();
     return;
   }
+  if (!selectedRow?.db_id) {
+    st.classList.remove('hidden');
+    st.style.color = 'var(--fail)';
+    st.textContent = 'Step 2에서 Target DB를 먼저 선택해주세요.';
+    return;
+  }
   btn.disabled = true;
   st.classList.remove('hidden');
   st.style.color = 'var(--text2)';
-  st.innerHTML = '<span class="spinner"></span> Repo 점검 진행 중... (6개 항목 점검)';
+  st.innerHTML = '<span class="spinner"></span> Repo 점검 Job 시작 중...';
   $('resultArea').classList.add('hidden');
 
   const body = {
+    db_id: selectedRow.db_id,
     recent_minutes: 30,
   };
 
   try {
-    const res = await fetch(`${API_RTS}/run-repo`, {
+    const res = await fetch(`${API_RTS}/run-repo-job`, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(body),
     });
-    const json = await res.json();
-    st.classList.add('hidden');
-    renderResult(json);
+    const started = await res.json();
+    if (!res.ok || !started.job_id) throw new Error(started.error || 'job start failed');
+
+    const jobId = started.job_id;
+    let finished = false;
+    while (!finished) {
+      await new Promise(r => setTimeout(r, 800));
+      const sres = await fetch(`${API_RTS}/run-repo-job/${jobId}`);
+      const job = await sres.json();
+      if (!sres.ok) throw new Error(job.error || 'job status failed');
+
+      const done = job.completed_steps || 0;
+      const total = job.total_steps || 6;
+      const pct = job.progress_pct || 0;
+      const step = job.current_step || '-';
+      st.classList.remove('hidden');
+      st.style.color = 'var(--text2)';
+      st.innerHTML = `<span class="spinner"></span> Repo 점검 진행 중... ${done}/${total} (${pct}%) - ${escHtml(step)}`;
+
+      if (job.status === 'done') {
+        st.classList.add('hidden');
+        renderResult(job.result || {});
+        finished = true;
+      } else if (job.status === 'error') {
+        throw new Error(job.error || 'job failed');
+      }
+    }
   } catch (e) {
     st.textContent = '요청 실패: ' + e.message;
     st.style.color = 'var(--fail)';
@@ -902,7 +1005,7 @@ $('btnRunTargetSql').onclick = async () => {
   btn.disabled = true;
   statusEl.classList.remove('hidden');
   statusEl.style.color = 'var(--text2)';
-  statusEl.innerHTML = '<span class="spinner"></span> Target 쿼리 실행 중...';
+  statusEl.innerHTML = '<span class="spinner"></span> Target 점검 실행 중...';
   $('resultArea').classList.add('hidden');
 
   try {
@@ -954,6 +1057,11 @@ function getCpuMemReqBody() {
 }
 
 function renderCpuMemResult(data) {
+  const kbToMbText = (v) => {
+    if (v === null || v === undefined || v === '' || Number.isNaN(Number(v))) return '-';
+    return (Number(v) / 1024).toFixed(2);
+  };
+
   const wrap = $('cpuMemResult');
   wrap.classList.remove('hidden');
   if (data.error) {
@@ -986,11 +1094,13 @@ function renderCpuMemResult(data) {
               `sample_count=${m.sample_count || 0}\n` +
               `cpu_avg=${m.cpu_avg_pct ?? '-'}%, cpu_max=${m.cpu_max_pct ?? '-'}%\n` +
               `mem_avg=${m.mem_avg_pct ?? '-'}%, mem_max=${m.mem_max_pct ?? '-'}%\n` +
-              `rss_avg=${m.rss_avg_kb ?? '-'}KB, rss_max=${m.rss_max_kb ?? '-'}KB`
+              `real_mem(rss)_avg=${kbToMbText(m.rss_avg_kb)}MB, real_mem(rss)_max=${kbToMbText(m.rss_max_kb)}MB\n` +
+              `virtual_mem(vsz)_avg=${kbToMbText(m.vsz_avg_kb)}MB, virtual_mem(vsz)_max=${kbToMbText(m.vsz_max_kb)}MB`
             )
           : escHtml(
               `pid=${m.pid || '-'}\n` +
-              `cpu=${m.cpu_pct ?? '-'}%, mem=${m.mem_pct ?? '-'}%, rss=${m.rss_kb ?? '-'}KB\n` +
+              `cpu=${m.cpu_pct ?? '-'}%, mem=${m.mem_pct ?? '-'}%\n` +
+              `real_mem(rss)=${kbToMbText(m.rss_kb)}MB, virtual_mem(vsz)=${kbToMbText(m.vsz_kb)}MB\n` +
               `${m.evidence || ''}`
             )
       }</div>
@@ -1178,10 +1288,462 @@ function resetResultArea() {
   $('cpuMemStatus').textContent = '';
 }
 
+// ─── Run New Repo Check ────────────────────
+$('btnRunRepoNew').onclick = async () => {
+  const btn = $('btnRunRepoNew');
+  const st = $('runStatus');
+  if (!selectedRow?.db_id) {
+    st.classList.remove('hidden'); st.style.color = 'var(--fail)'; st.textContent = 'Target DB를 먼저 선택해주세요.'; return;
+  }
+  btn.disabled = true;
+  st.classList.remove('hidden'); st.style.color = 'var(--text2)'; st.innerHTML = '<span class="spinner"></span> 신규 Repo 점검 Job 시작 중... (tuned workload)';
+  $('resultArea').classList.add('hidden');
+
+  try {
+    const targetPassword = $('targetPassword').value;
+    const sysPasswordEl = document.getElementById('sysPassword');
+    const sysPassword = sysPasswordEl ? sysPasswordEl.value : '';
+
+    const body = {
+      db_id: selectedRow.db_id,
+      target_config: { host: selectedRow.host_ip, port: selectedRow.lsnr_port||1521, user: selectedRow.db_user, password: targetPassword, sid: selectedRow.sid },
+      sys_password: sysPassword,
+      case4_loops: 200,
+      case5_loops: 30,
+      case5_rows: 50000
+    };
+    const repoDbIdList = ($('repoDbIdList')?.value || '').trim();
+    const repoPartitionDate = ($('repoPartitionDate')?.value || '').trim();
+    const repoLoggingTime = ($('repoLoggingTime')?.value || '').trim();
+    const repoSchemaNameVal = ($('repoSchemaName')?.value || '').trim();
+    const eng = String(repoStep5Engine || '').toLowerCase();
+    if (eng !== 'postgresql' && eng !== 'postgres' && repoDbIdList) body.repo_db_id_list = repoDbIdList;
+    if (repoPartitionDate) body.repo_partition_date = repoPartitionDate;
+    if (repoLoggingTime) body.repo_logging_time = repoLoggingTime;
+    if (eng !== 'oracle' && repoSchemaNameVal) body.schema_name = repoSchemaNameVal;
+
+    const res = await fetch(`${API_RTS}/run-repo-new-job`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)
+    });
+    const started = await res.json().catch(() => ({}));
+    if (!res.ok || !started.job_id) throw new Error(started.error || 'job start failed');
+
+    const jobId = started.job_id;
+    let finished = false;
+    while (!finished) {
+      await new Promise(r => setTimeout(r, 1000));
+      const sres = await fetch(`${API_RTS}/run-repo-new-job/${jobId}`);
+      const job = await sres.json().catch(() => ({}));
+      if (!sres.ok) throw new Error(job.error || 'job status failed');
+
+      const done = job.completed_steps || 0;
+      const total = job.total_steps || 6;
+      const pct = job.progress_pct || 0;
+      const step = job.current_step || '-';
+      st.classList.remove('hidden');
+      st.style.color = 'var(--text2)';
+      st.innerHTML = `<span class="spinner"></span> 신규 Repo 점검 실행 중... ${done}/${total} (${pct}%) - ${escHtml(step)}`;
+
+      if (job.status === 'done') {
+        st.classList.add('hidden');
+        renderNewRepoResultGrid(job.result || {});
+        finished = true;
+      } else if (job.status === 'error') {
+        throw new Error(job.error || 'job failed');
+      }
+    }
+  } catch (e) {
+    st.textContent = '요청 실패: ' + (e?.message || String(e)); st.style.color = 'var(--fail)';
+  } finally { btn.disabled = false; }
+};
+
+function lookup(arr, id, field) {
+  const rows = (arr || []).filter(x => String(x.sql_id || '').toLowerCase() === id.toLowerCase());
+  if (!rows.length) return null;
+  // 같은 SQL_ID가 여러 건일 때 마지막(최신 정렬 기준) 값을 사용
+  const r = rows[rows.length - 1];
+  return r ? r[field] : null;
+}
+
+function normalizeStr(v) {
+  return String(v == null ? '' : v).trim().toLowerCase();
+}
+
+function normalizeNum(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function rowMatchesSignature(row, sig, fallbackSqlId) {
+  const sid = normalizeStr(row?.sql_id);
+  const fid = normalizeStr(fallbackSqlId);
+  const sigId = normalizeStr(sig?.sql_id);
+  if ((fid && sid === fid) || (sigId && sid === sigId)) return true;
+
+  const rowHash = normalizeNum(row?.sql_hash);
+  const sigHash = normalizeNum(sig?.sql_hash);
+  const rowAddr = normalizeStr(row?.sql_addr);
+  const sigAddr = normalizeStr(sig?.sql_addr);
+  const rowPlan = normalizeNum(row?.sql_plan_hash);
+  const sigPlan = normalizeNum(sig?.sql_plan_hash);
+
+  if (sigHash !== null && rowHash !== null && sigHash === rowHash) return true;
+  if (sigAddr && rowAddr && sigAddr === rowAddr) return true;
+  if (sigPlan !== null && rowPlan !== null && sigPlan === rowPlan && sigHash !== null && rowHash === sigHash) return true;
+  return false;
+}
+
+function rowsBySignature(arr, sig, fallbackSqlId) {
+  return (arr || []).filter((r) => rowMatchesSignature(r, sig, fallbackSqlId));
+}
+
+/** Step 5 Repo 조회에 사용된 sql_id와 동일한 행만 매칭 (기대 sql_id 폴백 없음) */
+function rowsByStep5SqlId(arr, sig, step5SqlId) {
+  const id = normalizeStr(step5SqlId);
+  if (!id) return [];
+  const bySig = rowsBySignature(arr, sig, id);
+  if (bySig.length) return bySig;
+  return (arr || []).filter((r) => normalizeStr(r?.sql_id) === id);
+}
+
+/** ORA_SQL_STAT_10MIN: 10분 버킷별 행 → 같은 sql_id 매칭분 합산 */
+function aggregateSqlStat10MinRows(rows) {
+  if (!rows.length) return { cnt: '-', el: '-', per: '-' };
+  let sumExec = 0;
+  let sumElSec = 0;
+  for (const r of rows) {
+    const e = Number(r.execution_count);
+    const el = Number(r.elapse_cs_to_sec);
+    if (Number.isFinite(e) && e > 0) sumExec += e;
+    if (Number.isFinite(el) && el >= 0) sumElSec += el;
+  }
+  if (sumExec <= 0) {
+    return { cnt: '-', el: sumElSec > 0 ? sumElSec.toFixed(2) : '-', per: '-' };
+  }
+  const per = sumElSec / sumExec;
+  return { cnt: sumExec, el: sumElSec.toFixed(2), per: per.toFixed(4) };
+}
+
+/** ORA_SQL_ELAPSE: 동일 sql_id 다행이면 execution_count 합·가중 평균(ms→표시 단위 유지) */
+function aggregateSqlElapseRows(rows) {
+  if (!rows.length) return { cnt: '-', avg: '-' };
+  let sumCnt = 0;
+  let wMs = 0;
+  for (const r of rows) {
+    const c = Number(r.execution_count);
+    const p = r.per_elapse_ms_to_sec ?? r.elapse_ms_to_sec;
+    const pn = Number(p);
+    if (Number.isFinite(c) && c > 0 && Number.isFinite(pn)) {
+      sumCnt += c;
+      wMs += pn * c;
+    }
+  }
+  if (sumCnt <= 0) return { cnt: '-', avg: '-' };
+  return { cnt: sumCnt, avg: (wMs / sumCnt).toFixed(2) };
+}
+
+function renderNewRepoResultGrid(json) {
+  $('resultArea').classList.remove('hidden');
+  const content = $('resultContent');
+  if (json.error || json.overall_status === 'error') {
+    content.innerHTML = `<div class="step-card"><div class="step-head"><span class="badge badge-error">ERROR</span></div><div class="evidence">${escHtml(json.error || 'Unknown Error')}</div></div>`;
+    return;
+  }
+  
+  const d = json.data || {};
+  const t_vsql = d.target_vsql || [];
+  const r_elapse = d.repo_elapse || [];
+  const r_stat = d.repo_stat || [];
+  const cleanup = d.cleanup_info || '';
+  const hasAnyElapse = r_elapse.length > 0;
+  const hasAnyStat = r_stat.length > 0;
+
+  const actualIds = d.case_actual_sql_ids || d.case_sql_ids || {};
+  const expectedIds = d.case_sql_ids_expected || {};
+  const dynamicSigs = d.case_signatures || {};
+  const caseExecDelta = d.case_exec_delta || {};
+  const step5SqlIdByCase = d.step5_sql_id_per_case || {};
+  const DEF_EXP = {
+    case1_plsql: "9fbyurzh8tr4c",
+    case2_proc1: "fbf2t9pw12ynm",
+    case3_proc2: "ga6tfrmnrzwax",
+    case4_proc3: "af5w9c5uq9mf5",
+    case5_proc4: "9yv10yjy19dva",
+    case6_proc5: "9t1uh0g3vjnd7",
+  };
+  const idCase1Plsql = (expectedIds.case1_plsql || DEF_EXP.case1_plsql).toLowerCase();
+  const idCase2Proc1 = (expectedIds.case2_proc1 || DEF_EXP.case2_proc1).toLowerCase();
+  const idCase3Proc2 = (expectedIds.case3_proc2 || DEF_EXP.case3_proc2).toLowerCase();
+  const idCase4Proc3 = (expectedIds.case4_proc3 || DEF_EXP.case4_proc3).toLowerCase();
+  const idCase5Proc4 = (expectedIds.case5_proc4 || DEF_EXP.case5_proc4).toLowerCase();
+  const idCase6Proc5 = (expectedIds.case6_proc5 || DEF_EXP.case6_proc5).toLowerCase();
+  const idCase1Actual = (actualIds.case1_plsql || idCase1Plsql).toLowerCase();
+  const idCase2Actual = (actualIds.case2_proc1 || idCase2Proc1).toLowerCase();
+  const idCase3Actual = (actualIds.case3_proc2 || idCase3Proc2).toLowerCase();
+  const idCase4Actual = (actualIds.case4_proc3 || idCase4Proc3).toLowerCase();
+  const idCase5Actual = (actualIds.case5_proc4 || idCase5Proc4).toLowerCase();
+  const idCase6Actual = (actualIds.case6_proc5 || idCase6Proc5).toLowerCase();
+
+  const caseMeta = {
+    [idCase1Plsql]: { case: "Case 1", proc: "PLSQL 전문에 대한 XView & SQL STAT 방향성 확인", label: "PLSQL 전문 쿼리" },
+    [idCase2Proc1]: { case: "Case 2", proc: "PLSQL 전문에 대한 XView & SQL STAT 방향성 확인", label: "3초 호출 쿼리" },
+    [idCase3Proc2]: { case: "Case 3", proc: "PLSQL 전문에 대한 XView & SQL STAT 방향성 확인", label: "1초 호출 쿼리" },
+    [idCase4Proc3]: { case: "Case 4", proc: "PLSQL 내부에서 호출되는 SQL 프로시저 별 XView & SQL STAT 방향성 확인", label: "0.05초 호출 쿼리" },
+    [idCase5Proc4]: { case: "Case 5", proc: "PLSQL 내부에서 호출되는 SQL 프로시저 별 XView & SQL STAT 방향성 확인", label: "0.01초 호출 쿼리" },
+    [idCase6Proc5]: { case: "Case 6", proc: "PLSQL 내부에서 호출되는 SQL 프로시저 별 XView & SQL STAT 방향성 확인", label: "0.001초 호출 쿼리" },
+  };
+
+  const targetRowById = {};
+  (t_vsql || []).forEach((r) => {
+    const sid = String(r.sql_id || '').toLowerCase();
+    if (sid) targetRowById[sid] = r;
+  });
+  const inferMetaFromTarget = (sid) => {
+    const r = targetRowById[String(sid || '').toLowerCase()];
+    const txt = String((r && r.sql_text) || '').toUpperCase();
+    if (!txt) return null;
+    if (txt.includes('TEST_FUNC_LIST')) {
+      return { case: "Case 1", proc: "PLSQL FOR LOOP 본문", label: "PLSQL 전문 쿼리" };
+    }
+    if (txt.includes('BEGIN QS_SQL_TEST_PROC1')) {
+      return { case: "Case 2", proc: "qs_sql_test_proc1 호출 (3s)", label: "프로시저 호출 쿼리" };
+    }
+    if (txt.includes('BEGIN QS_SQL_TEST_PROC2')) {
+      return { case: "Case 3", proc: "qs_sql_test_proc2 호출 (1s)", label: "프로시저 호출 쿼리" };
+    }
+    if (txt.includes('BEGIN QS_SQL_TEST_PROC3')) {
+      return { case: "Case 4", proc: "qs_sql_test_proc3 호출 (0.05s)", label: "프로시저 호출 쿼리" };
+    }
+    if (txt.includes('BEGIN QS_SQL_TEST_PROC4')) {
+      return { case: "Case 5", proc: "qs_sql_test_proc4 호출 (0.01s)", label: "프로시저 호출 쿼리" };
+    }
+    if (txt.includes('BEGIN QS_SQL_TEST_PROC5')) {
+      return { case: "Case 6", proc: "qs_sql_test_proc5 호출 (0.001s)", label: "프로시저 호출 쿼리" };
+    }
+    return null;
+  };
+
+  const wantedOrder = [idCase1Plsql, idCase2Proc1, idCase3Proc2, idCase4Proc3, idCase5Proc4, idCase6Proc5];
+  const idsToRender = [...wantedOrder];
+
+  const grouped = {};
+  idsToRender.forEach((id) => {
+    const meta = caseMeta[id] || inferMetaFromTarget(id) || { case: "Case ?", proc: "Detected from query result", label: "Detected SQL" };
+    if (!grouped[meta.case]) grouped[meta.case] = { case: meta.case, proc: meta.proc, items: [] };
+    let sig = null;
+    if (id === idCase1Plsql) sig = dynamicSigs.case1_plsql || null;
+    else if (id === idCase2Proc1) sig = dynamicSigs.case2_proc1 || null;
+    else if (id === idCase3Proc2) sig = dynamicSigs.case3_proc2 || null;
+    else if (id === idCase4Proc3) sig = dynamicSigs.case4_proc3 || null;
+    else if (id === idCase5Proc4) sig = dynamicSigs.case5_proc4 || null;
+    else if (id === idCase6Proc5) sig = dynamicSigs.case6_proc5 || null;
+    let actualId = id;
+    if (id === idCase1Plsql) actualId = idCase1Actual;
+    else if (id === idCase2Proc1) actualId = idCase2Actual;
+    else if (id === idCase3Proc2) actualId = idCase3Actual;
+    else if (id === idCase4Proc3) actualId = idCase4Actual;
+    else if (id === idCase5Proc4) actualId = idCase5Actual;
+    else if (id === idCase6Proc5) actualId = idCase6Actual;
+    const ck =
+        id === idCase1Plsql ? 'case1_plsql' :
+        id === idCase2Proc1 ? 'case2_proc1' :
+        id === idCase3Proc2 ? 'case3_proc2' :
+        id === idCase4Proc3 ? 'case4_proc3' :
+        id === idCase5Proc4 ? 'case5_proc4' :
+        id === idCase6Proc5 ? 'case6_proc5' : '';
+    const step5SqlId = normalizeStr(step5SqlIdByCase[ck] || actualId || id) || '';
+    grouped[meta.case].items.push({
+      label: `${meta.label}\n(Step5 sql_id : ${step5SqlId})`,
+      id,
+      actualId,
+      step5SqlId,
+      sig,
+      caseKey: ck
+    });
+  });
+  const sqls = Object.values(grouped);
+
+  let rowsHtml = '';
+  sqls.forEach((c) => {
+    let caseRowSpan = c.items.length * 3;
+    let isFirstInCase = true;
+    
+    c.items.forEach((s) => {
+      // Target DB (v$sql)
+      const tRows = rowsByStep5SqlId(t_vsql, s.sig, s.step5SqlId);
+      const tRow = tRows.length ? tRows[tRows.length - 1] : null;
+      let t_exec = tRow ? (tRow.executions ?? '-') : '-';
+      const deltaExec = Number(caseExecDelta[s.caseKey] ?? 0);
+      const isCase1 = s.caseKey === 'case1_plsql';
+      if (isCase1 && Number.isFinite(deltaExec) && deltaExec > 0 && t_exec !== '-') {
+        t_exec = `${t_exec} (Δ${deltaExec})`;
+      }
+      let t_el = tRow ? tRow.elapsed_time_s : null; t_el = t_el != null ? parseFloat(t_el).toFixed(2) : '-';
+      let t_per = tRow ? tRow.per_elapse_sec : null; t_per = t_per != null ? parseFloat(t_per).toFixed(4) : '-';
+      
+      // Repo DB (ORA_SQL_ELAPSE) — 버킷/중복 행 합산
+      const reRows = rowsByStep5SqlId(r_elapse, s.sig, s.step5SqlId);
+      const reAgg = aggregateSqlElapseRows(reRows);
+      let re_cnt = reAgg.cnt;
+      let re_avg = reAgg.avg;
+      
+      // Repo DB (ORA_SQL_STAT_10MIN) — 10분 버킷 다건 합산
+      const rsRows = rowsByStep5SqlId(r_stat, s.sig, s.step5SqlId);
+      const rsAgg = aggregateSqlStat10MinRows(rsRows);
+      let rs_cnt = rsAgg.cnt;
+      let rs_el = rsAgg.el;
+      let rs_per = rsAgg.per;
+      const rsPerNum = Number(rs_per);
+      if ((re_cnt === '-' || re_cnt === null) && Number.isFinite(rsPerNum) && rsPerNum > 0 && rsPerNum < 1) {
+        re_cnt = '미수집(<1s)';
+      }
+      if ((re_avg === '-' || re_avg === null) && Number.isFinite(rsPerNum) && rsPerNum > 0 && rsPerNum < 1) {
+        re_avg = '미수집(<1s)';
+      }
+      if ((re_cnt === '-' || re_cnt === null) && hasAnyElapse) {
+        if (isCase1 && Number.isFinite(deltaExec) && deltaExec > 0) {
+          re_cnt = '실행시점차이';
+        } else {
+        re_cnt = '미매칭';
+        }
+      }
+      if ((re_avg === '-' || re_avg === null) && hasAnyElapse) {
+        if (isCase1 && Number.isFinite(deltaExec) && deltaExec > 0) {
+          re_avg = '실행시점차이';
+        } else {
+        re_avg = '미매칭';
+        }
+      }
+      if ((rs_cnt === '-' || rs_cnt === null) && hasAnyStat) {
+        rs_cnt = '미매칭';
+      }
+      if ((rs_el === '-' || rs_el === null) && hasAnyStat) {
+        rs_el = '미매칭';
+      }
+      if ((rs_per === '-' || rs_per === null) && hasAnyStat) {
+        rs_per = '미매칭';
+      }
+
+      let caseAndProcHtml = isFirstInCase ? `
+        <td rowspan="${caseRowSpan}" style="font-weight:600; border:1px solid #ccc; padding:8px; text-align:center;">${c.case}</td>
+        <td rowspan="${caseRowSpan}" style="border:1px solid #ccc; padding:8px; white-space:pre-wrap;">${c.proc}</td>
+      ` : ``;
+
+      rowsHtml += `
+        <tr style="background:#fff; color:#333;">
+          ${caseAndProcHtml}
+          <td rowspan="3" style="border:1px solid #ccc; padding:8px; white-space:pre-wrap; vertical-align:top;">${s.label}</td>
+          
+          <td style="border:1px solid #ccc; padding:4px 8px;">Executions</td>
+          <td style="border:1px solid #ccc; text-align:right; padding:4px 8px;">${t_exec}</td>
+          
+          <td style="border:1px solid #ccc; padding:4px 8px;">로깅 횟수</td>
+          <td style="border:1px solid #ccc; text-align:right; padding:4px 8px; color:#d93025; font-weight:bold;">${re_cnt}</td>
+          <td style="border:1px solid #ccc; padding:4px 8px;">로깅 횟수</td>
+          <td style="border:1px solid #ccc; text-align:right; padding:4px 8px; color:#d93025; font-weight:bold;">${re_cnt}</td>
+          
+          <td style="border:1px solid #ccc; padding:4px 8px;">Execution Count</td>
+          <td style="border:1px solid #ccc; text-align:right; padding:4px 8px; color:#1a73e8; font-weight:bold;">${rs_cnt}</td>
+          <td style="border:1px solid #ccc; padding:4px 8px;">Execution Count</td>
+          <td style="border:1px solid #ccc; text-align:right; padding:4px 8px; color:#1a73e8; font-weight:bold;">${rs_cnt}</td>
+        </tr>
+        <tr style="background:#fff; color:#333;">
+          <td style="border:1px solid #ccc; padding:4px 8px;">Elapsed Time (Sec)</td>
+          <td style="border:1px solid #ccc; text-align:right; padding:4px 8px;">${t_el}</td>
+          
+          <td style="border:1px solid #ccc; padding:4px 8px; background:#fafafa;"></td>
+          <td style="border:1px solid #ccc; padding:4px 8px; background:#fafafa;"></td>
+          <td style="border:1px solid #ccc; padding:4px 8px; background:#fafafa;"></td>
+          <td style="border:1px solid #ccc; padding:4px 8px; background:#fafafa;"></td>
+          
+          <td style="border:1px solid #ccc; padding:4px 8px;">Elapsed Time (Sec)</td>
+          <td style="border:1px solid #ccc; text-align:right; padding:4px 8px;">${rs_el}</td>
+          <td style="border:1px solid #ccc; padding:4px 8px;">Elapsed Time (Sec)</td>
+          <td style="border:1px solid #ccc; text-align:right; padding:4px 8px;">${rs_el}</td>
+        </tr>
+        <tr style="background:#fff; color:#333;">
+          <td style="border:1px solid #ccc; padding:4px 8px;">Elapsed Time / Executions (Sec)</td>
+          <td style="border:1px solid #ccc; text-align:right; padding:4px 8px;">${t_per}</td>
+          
+          <td style="border:1px solid #ccc; padding:4px 8px;">로깅 1회당 Elapse 평균</td>
+          <td style="border:1px solid #ccc; text-align:right; padding:4px 8px; color:#d93025; font-weight:bold;">${re_avg}</td>
+          <td style="border:1px solid #ccc; padding:4px 8px;">로깅 1회당 Elapse 평균</td>
+          <td style="border:1px solid #ccc; text-align:right; padding:4px 8px; color:#d93025; font-weight:bold;">${re_avg}</td>
+          
+          <td style="border:1px solid #ccc; padding:4px 8px;">Elapsed Time / Executions (Sec)</td>
+          <td style="border:1px solid #ccc; text-align:right; padding:4px 8px;">${rs_per}</td>
+          <td style="border:1px solid #ccc; padding:4px 8px;">Elapsed Time / Executions (Sec)</td>
+          <td style="border:1px solid #ccc; text-align:right; padding:4px 8px;">${rs_per}</td>
+        </tr>
+      `;
+      isFirstInCase = false;
+    });
+  });
+
+  const repoTxt = document.getElementById('repoStatusText')
+    ? document.getElementById('repoStatusText').textContent
+    : `${(d.repo_engine || 'repo').toUpperCase()}${d.repo_schema ? `/${d.repo_schema}` : ''}`;
+  const targetTxt = selectedRow ? `${selectedRow.instance} (DB_ID: ${selectedRow.db_id}, Host: ${selectedRow.host_ip})` : '알 수 없음';
+  const gridHtml = `
+  <div style="font-size:12px; margin-bottom: 20px; font-family:-apple-system, sans-serif; overflow-x: auto;">
+    <div style="margin-bottom: 10px; font-size: 14px; font-weight: bold; background: #e3f2fd; padding: 10px; border-radius: 4px; border-left: 4px solid #1a73e8; color: #333;">
+      <span style="color: #1a73e8; margin-right: 5px;">[Repo DB]</span> <span style="font-weight: normal; margin-right: 20px;">${repoTxt}</span>
+      <span style="color: #1a73e8; margin-right: 5px;">[Target DB]</span> <span style="font-weight: normal;">${targetTxt}</span>
+    </div>
+    <div style="min-width: 1400px;">
+      <table style="width:100%; border-collapse:collapse; text-align:left; border:1px solid #ccc;">
+        <thead>
+          <tr style="background:#f7f7f7; color:#b91c1c; font-weight:700;">
+            <th colspan="3" style="border:1px solid #ccc; padding:4px; text-align:center;"></th>
+            <th colspan="2" style="border:1px solid #ccc; padding:4px; text-align:center;">기대 결과</th>
+            <th colspan="4" style="border:1px solid #ccc; padding:4px; text-align:center;">XView 방향성 검증</th>
+            <th colspan="4" style="border:1px solid #ccc; padding:4px; text-align:center;">SQL_STAT 방향성 검증</th>
+          </tr>
+          <tr style="background:#0a4c5a; color:white;">
+            <th rowspan="3" style="border:1px solid #ccc; padding:10px; text-align:center; min-width:80px;">Test Case</th>
+            <th rowspan="3" style="border:1px solid #ccc; padding:10px; text-align:center; min-width:280px;">Test Info</th>
+            <th rowspan="3" style="border:1px solid #ccc; padding:10px; text-align:center; min-width:240px;">검증 대상 쿼리</th>
+            <th colspan="2" rowspan="2" style="border:1px solid #ccc; padding:10px; text-align:center;">Target DB > V$SQL</th>
+            <th colspan="4" style="border:1px solid #ccc; padding:4px; text-align:center;">Repo DB > ORA_SQL_ELAPSE</th>
+            <th colspan="4" style="border:1px solid #ccc; padding:4px; text-align:center;">Repo DB > ORA_SQL_STAT_10MIN</th>
+          </tr>
+          <tr style="background:#0a4c5a; color:white;">
+            <th colspan="2" style="border:1px solid #ccc; padding:4px; text-align:center;">VSQL_RTS</th>
+            <th colspan="2" style="border:1px solid #ccc; padding:4px; text-align:center;">POL_RTS</th>
+            <th colspan="2" style="border:1px solid #ccc; padding:4px; text-align:center;">VSQL_RTS</th>
+            <th colspan="2" style="border:1px solid #ccc; padding:4px; text-align:center;">POL_RTS</th>
+          </tr>
+          <tr style="background:#0a4c5a; color:white;">
+            <th style="border:1px solid #ccc; padding:6px; text-align:center; min-width:140px;">DATA</th>
+            <th style="border:1px solid #ccc; padding:6px; text-align:center; min-width:80px;">VALUE</th>
+            <th style="border:1px solid #ccc; padding:6px; text-align:center; min-width:140px;">DATA</th>
+            <th style="border:1px solid #ccc; padding:6px; text-align:center; min-width:80px;">VALUE</th>
+            <th style="border:1px solid #ccc; padding:6px; text-align:center; min-width:140px;">DATA</th>
+            <th style="border:1px solid #ccc; padding:6px; text-align:center; min-width:80px;">VALUE</th>
+            <th style="border:1px solid #ccc; padding:6px; text-align:center; min-width:140px;">DATA</th>
+            <th style="border:1px solid #ccc; padding:6px; text-align:center; min-width:80px;">VALUE</th>
+            <th style="border:1px solid #ccc; padding:6px; text-align:center; min-width:140px;">DATA</th>
+            <th style="border:1px solid #ccc; padding:6px; text-align:center; min-width:80px;">VALUE</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rowsHtml}
+        </tbody>
+      </table>
+    </div>
+    <div style="margin-top:14px; padding:12px; background:var(--theme-panel-alt-bg); border: 1px dashed #ccc; border-radius:6px;">
+      <strong>Cleanup Log:</strong> <span style="font-family:monospace; margin-left:8px;">${cleanup}</span>
+    </div>
+  </div>
+  `;
+  content.innerHTML = gridHtml;
+}
+
 // ─── Init ──────────────────────────────────
 resetTargetDbArea();
 resetResultArea();
 initThemeToggle();
+syncRepoStep5FieldsForEngine('');
 loadRepoStatus();
 </script>
 </body>
