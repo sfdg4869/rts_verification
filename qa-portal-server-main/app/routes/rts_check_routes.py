@@ -600,6 +600,8 @@ def run_check():
             base_dir=data.get("base_dir"),
             host_override=data.get("host_override"),
             on_failure=data.get("on_failure", "run_all"),
+            verify_stop=bool(data.get("verify_stop", False)),
+            stop_wait_sec=int(data.get("stop_wait_sec", 10)),
         )
         return jsonify(result), 200
     except Exception as e:
@@ -920,6 +922,156 @@ def run_repo_new_job_api():
                     _persist_repo_jobs()
 
     threading.Thread(target=_worker, daemon=True, name=f"repo-new-job-{job_id[:8]}").start()
+    return jsonify({"job_id": job_id, "status": "running"}), 202
+
+
+@bp.route("/run-repo-steps14-job", methods=["POST"])
+def run_repo_steps14_job_api():
+    """Step 1~4만 실행: 프로시저 생성 및 실행 (Repo 조회 없음)"""
+    from app.services.new_repo_check_service import run_new_repo_check
+    from app.services.target_sql_test_service import _get_apm_db_row_with_secret
+
+    data = request.get_json(silent=True) or {}
+    db_id = data.get("db_id")
+    target_cfg = data.get("target_config")
+    sys_password = data.get("sys_password") or ""
+    if not db_id:
+        return jsonify({"error": "db_id is required"}), 400
+
+    job_id = str(uuid.uuid4())
+    with _REPO_JOB_LOCK:
+        _REPO_JOBS[job_id] = {
+            "job_id": job_id, "type": "repo_steps14",
+            "status": "running", "started_at": int(time.time()),
+            "completed_steps": 0, "total_steps": 4,
+            "current_step": "", "current_step_status": "", "progress_pct": 0,
+            "result": None, "error": None,
+        }
+        _persist_repo_jobs()
+
+    def _worker():
+        try:
+            resolved_target_cfg = target_cfg
+            resolved_db_id = int(db_id)
+            if not resolved_target_cfg or not resolved_target_cfg.get("password"):
+                ok, row, err = _get_apm_db_row_with_secret(resolved_db_id)
+                if not ok or not row:
+                    raise RuntimeError(err)
+                if not resolved_target_cfg:
+                    resolved_target_cfg = {"host": row["host_ip"], "port": row["lsnr_port"], "user": row["db_user"], "password": row["db_password"], "sid": row["sid"]}
+                else:
+                    resolved_target_cfg["password"] = row["db_password"]
+
+            def _progress(done: int, total: int, step_name: str, step_status: str):
+                with _REPO_JOB_LOCK:
+                    job = _REPO_JOBS.get(job_id)
+                    if not job:
+                        return
+                    effective_total = 4  # Step1~4만 실행
+                    effective_done = min(int(done), effective_total)
+                    job["completed_steps"] = effective_done
+                    job["total_steps"] = effective_total
+                    job["current_step"] = step_name
+                    job["current_step_status"] = step_status
+                    job["progress_pct"] = int((effective_done / effective_total) * 100) if effective_total else 0
+                    _persist_repo_jobs()
+
+            result = run_new_repo_check(
+                resolved_db_id, resolved_target_cfg, sys_password,
+                progress_callback=_progress,
+                stop_after_step4=True,
+            )
+            with _REPO_JOB_LOCK:
+                job = _REPO_JOBS.get(job_id)
+                if job:
+                    job["status"] = "done"
+                    job["completed_steps"] = 4
+                    job["progress_pct"] = 100
+                    job["result"] = result
+                    _persist_repo_jobs()
+        except Exception as e:
+            with _REPO_JOB_LOCK:
+                job = _REPO_JOBS.get(job_id)
+                if job:
+                    job["status"] = "error"
+                    job["error"] = str(e)
+                    _persist_repo_jobs()
+
+    threading.Thread(target=_worker, daemon=True, name=f"repo-steps14-job-{job_id[:8]}").start()
+    return jsonify({"job_id": job_id, "status": "running"}), 202
+
+
+@bp.route("/run-repo-step5-job", methods=["POST"])
+def run_repo_step5_job_api():
+    """Step5+6 독립 실행: Repo DB ORA_SQL_ELAPSE/ORA_SQL_STAT_10MIN 조회 + SYS 정리"""
+    from app.services.new_repo_check_service import run_step5_repo_only
+
+    data = request.get_json(silent=True) or {}
+    db_id = data.get("db_id")
+    if not db_id:
+        return jsonify({"error": "db_id is required"}), 400
+
+    repo_partition_date  = data.get("repo_partition_date")
+    repo_logging_time    = data.get("repo_logging_time")
+    pol_repo_config_id   = data.get("pol_repo_config_id") or None
+    pol_repo_schema_name = (data.get("pol_repo_schema_name") or "").strip() or None
+    pol_repo_db_id_list  = data.get("pol_repo_db_id_list") or None
+    target_cfg           = data.get("target_config") or None
+    sys_password         = data.get("sys_password") or None
+
+    job_id = str(uuid.uuid4())
+    with _REPO_JOB_LOCK:
+        _REPO_JOBS[job_id] = {
+            "job_id": job_id, "type": "repo_step5",
+            "status": "running", "started_at": int(time.time()),
+            "completed_steps": 0, "total_steps": 3,
+            "current_step": "", "current_step_status": "", "progress_pct": 0,
+            "result": None, "error": None,
+        }
+        _persist_repo_jobs()
+
+    def _worker():
+        try:
+            def _progress(done: int, total: int, step_name: str, step_status: str):
+                with _REPO_JOB_LOCK:
+                    job = _REPO_JOBS.get(job_id)
+                    if not job:
+                        return
+                    job["completed_steps"] = int(done)
+                    job["total_steps"] = int(total)
+                    job["current_step"] = step_name
+                    job["current_step_status"] = step_status
+                    job["progress_pct"] = int((done / total) * 100) if total else 0
+                    _persist_repo_jobs()
+
+            result = run_step5_repo_only(
+                db_id=int(db_id),
+                repo_partition_date=repo_partition_date,
+                repo_logging_time=repo_logging_time,
+                pol_repo_config_id=pol_repo_config_id,
+                pol_repo_schema_name=pol_repo_schema_name,
+                pol_repo_db_id_list=pol_repo_db_id_list,
+                target_config=target_cfg,
+                sys_password=sys_password,
+                progress_callback=_progress,
+            )
+            with _REPO_JOB_LOCK:
+                job = _REPO_JOBS.get(job_id)
+                if job:
+                    job["status"] = "done"
+                    job["completed_steps"] = 2
+                    job["progress_pct"] = 100
+                    job["result"] = result
+                    _persist_repo_jobs()
+        except Exception as e:
+            with _REPO_JOB_LOCK:
+                job = _REPO_JOBS.get(job_id)
+                if job:
+                    job["status"] = "error"
+                    job["error"] = str(e)
+                    _persist_repo_jobs()
+
+    threading.Thread(target=_worker, daemon=True, name=f"repo-step5-job-{job_id[:8]}").start()
     return jsonify({"job_id": job_id, "status": "running"}), 202
 
 

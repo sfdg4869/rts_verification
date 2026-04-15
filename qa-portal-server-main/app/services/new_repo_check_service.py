@@ -103,23 +103,94 @@ def _extract_oracle_create_procedures(sql_text: str) -> List[str]:
 
 
 def _split_oracle_blocks(sql_text: str) -> List[str]:
+    """
+    Oracle PL/SQL DECLARE…END; 블록을 올바르게 분리한다.
+    BEGIN / IF / LOOP / CASE 로 depth+1, END 로 depth-1.
+    END IF / END LOOP / END CASE 는 단일 닫기 토큰으로 처리.
+    내부 세미콜론이 있어도 블록 전체를 보존한다.
+    """
     if not sql_text.strip():
         return []
+
+    # 라인 주석 제거, 블록 주석 제거
     lines = []
     for line in sql_text.splitlines():
-        t = line.strip()
-        if t.startswith("--") or t.startswith("/*") or t.startswith("*/"):
+        stripped = line.strip()
+        if stripped.startswith("--"):
             continue
+        idx = line.find("--")
+        if idx >= 0:
+            line = line[:idx]
         lines.append(line)
-    cleaned = "\n".join(lines)
-    parts = re.split(r";\s*\n", cleaned)
+    text = "\n".join(lines)
+    text = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
+
+    # BEGIN / IF / LOOP / CASE → depth+1 / END → depth-1
+    # DECLARE 자체는 depth 변화 없음 (BEGIN 이 뒤따라 옴)
+    _OPENERS = {"BEGIN", "IF", "LOOP", "CASE"}
+    _END_SUFFIXES = {"IF", "LOOP", "CASE"}  # END IF / END LOOP / END CASE
+    _TOK = re.compile(r"\b(DECLARE|BEGIN|END|IF|LOOP|CASE)\b", re.IGNORECASE)
+
     blocks: List[str] = []
-    for p in parts:
-        q = p.strip()
-        if not q:
-            continue
-        if q.upper().startswith("DECLARE"):
-            blocks.append(q + ";")
+    pos = 0
+    text_len = len(text)
+
+    while pos < text_len:
+        # 다음 DECLARE 위치 탐색
+        m = re.search(r"\bDECLARE\b", text[pos:], re.IGNORECASE)
+        if not m:
+            break
+
+        block_start = pos + m.start()
+        scan = block_start + len("DECLARE")
+        depth = 0
+
+        while scan < text_len:
+            tm = _TOK.search(text, scan)
+            if not tm:
+                scan = text_len
+                break
+
+            word = tm.group(1).upper()
+
+            if word == "DECLARE":
+                # 중첩 DECLARE: depth 변화 없음, BEGIN 이 depth 올림
+                scan = tm.end()
+
+            elif word in _OPENERS:
+                depth += 1
+                scan = tm.end()
+
+            elif word == "END":
+                # END 다음에 IF / LOOP / CASE 가 오면 그 토큰을 건너뜀 (닫기 키워드)
+                depth -= 1
+                scan = tm.end()
+
+                if depth == 0:
+                    # END 뒤 선택적 키워드 + 세미콜론까지 포함
+                    end_extra = re.match(
+                        r"\s*(?:IF|LOOP|CASE)?\s*;", text[scan:], re.IGNORECASE
+                    )
+                    if end_extra:
+                        scan += end_extra.end()
+                    block = text[block_start:scan].strip()
+                    # 세미콜론으로 끝나지 않으면 추가
+                    if not block.endswith(";"):
+                        block += ";"
+                    blocks.append(block)
+                    pos = scan
+                    break
+                else:
+                    # END IF / END LOOP 처리: 다음 키워드가 IF/LOOP/CASE 이면 건너뜀
+                    next_kw = re.match(r"\s*(\w+)", text[scan:])
+                    if next_kw and next_kw.group(1).upper() in _END_SUFFIXES:
+                        scan += next_kw.end()
+            else:
+                scan = tm.end()
+        else:
+            # DECLARE를 찾았지만 닫는 END가 없음
+            break
+
     return blocks
 
 
@@ -154,6 +225,7 @@ def run_new_repo_check(
     pol_repo_config_id: Optional[str] = None,
     pol_repo_schema_name: Optional[str] = None,
     pol_repo_db_id_list: Optional[str] = None,
+    stop_after_step4: bool = False,
 ) -> Dict[str, Any]:
     def _progress(done: int, total: int, step_name: str, step_status: str) -> None:
         if progress_callback:
@@ -531,6 +603,11 @@ def run_new_repo_check(
     if overall_status == "error":
         return {"overall_status": overall_status, "error": error_msg, "data": result_data}
 
+    # Step 1~4만 실행 후 반환
+    if stop_after_step4:
+        result_data["stop_after_step4"] = True
+        return {"overall_status": overall_status, "error": error_msg, "data": result_data}
+
     # Step 5: Repo 수집 결과 조회 (Oracle/PG 분기)
     try:
         repo_cfg = get_db_config("repo") or {}
@@ -811,6 +888,417 @@ def run_new_repo_check(
         clean_msg = "SYS password not provided; cleanup skipped"
         _progress(6, 6, "target_cleanup_sys", "skip")
 
+    result_data["cleanup_info"] = clean_msg
+
+    return {
+        "overall_status": overall_status,
+        "error": error_msg,
+        "data": result_data,
+    }
+
+
+def run_step5_repo_only(
+    db_id: int,
+    repo_partition_date: Optional[str] = None,
+    repo_logging_time: Optional[str] = None,
+    repo_schema_name: Optional[str] = None,
+    repo_db_id_list: Optional[str] = None,
+    pol_repo_config_id: Optional[str] = None,
+    pol_repo_schema_name: Optional[str] = None,
+    pol_repo_db_id_list: Optional[str] = None,
+    target_config: Optional[Dict[str, Any]] = None,
+    sys_password: Optional[str] = None,
+    progress_callback=None,
+) -> Dict[str, Any]:
+    """
+    Step 5+6 독립 실행: Target 프로시저 없이 Repo DB에서
+    ORA_SQL_ELAPSE / ORA_SQL_STAT_10MIN 조회 후 SYS 정리(선택)를 수행합니다.
+    """
+    def _progress(done: int, total: int, step_name: str, step_status: str) -> None:
+        if progress_callback:
+            progress_callback(done, total, step_name, step_status)
+
+    def _safe_pg_schema(raw: Any) -> str:
+        s = str(raw or "").strip()
+        if not s:
+            return "public"
+        ok = (s[0].isalpha() or s[0] == "_") and all(ch.isalnum() or ch == "_" for ch in s)
+        return s if ok else "public"
+
+    def _safe_db_id_list(raw: Optional[str], default_db_id: int) -> str:
+        src = str(raw or "").strip()
+        if not src:
+            return str(int(default_db_id))
+        vals = [str(int(t.strip())) for t in src.split(",") if t.strip().isdigit()]
+        return ",".join(vals) if vals else str(int(default_db_id))
+
+    case_order = [
+        "case2_proc1", "case3_proc2", "case4_proc3", "case5_proc4", "case6_proc5",
+    ]
+    fixed_sql_ids = [
+        "fbf2t9pw12ynm", "ga6tfrmnrzwax", "af5w9c5uq9mf5", "9yv10yjy19dva", "9t1uh0g3vjnd7",
+    ]
+
+    result_data: Dict[str, Any] = {
+        "target_vsql": [],
+        "repo_elapse": [], "repo_stat": [],
+        "repo_elapse_vsql": [], "repo_stat_vsql": [],
+        "repo_elapse_pol": [], "repo_stat_pol": [],
+        "case_sql_ids": {k: v for k, v in zip(case_order, fixed_sql_ids)},
+        "case_actual_sql_ids": {},
+        "case_signatures": {},
+        "step5_sql_id_per_case": {k: v for k, v in zip(case_order, fixed_sql_ids)},
+        "effective_sql_ids": fixed_sql_ids,
+        "permission_checks": {},
+        "logging_time": "", "partition_date": "",
+        "repo_engine": "", "repo_schema": "",
+        "case_exec_before": {}, "case_exec_after": {}, "case_exec_delta": {},
+    }
+
+    overall_status = "pass"
+    error_msg = ""
+
+    logging_anchor = datetime.now()
+
+    # partition_date / logging_time 처리
+    default_partition_date = logging_anchor.strftime("%y%m%d")
+    partition_date = str(repo_partition_date or default_partition_date).strip()
+    if not (partition_date.isdigit() and len(partition_date) == 6):
+        partition_date = default_partition_date
+    default_logging_time = logging_anchor.strftime("%Y-%m-%d %H:%M:%S")
+    logging_time_str = str(repo_logging_time or default_logging_time).strip()
+    if len(logging_time_str) < 19:
+        logging_time_str = default_logging_time
+
+    result_data["partition_date"] = partition_date
+    result_data["logging_time"] = logging_time_str
+
+    sql_id_filter = _sql_id_literal_list(fixed_sql_ids)
+    sql_id_order_expr = _decode_sql_id_order_expr("a.sql_id", fixed_sql_ids)
+    db_id_list_str = _safe_db_id_list(repo_db_id_list, int(db_id))
+    result_data["db_id_list"] = db_id_list_str
+
+    # ── Target DB > V$SQL 조회 (target_config 제공 시) ──────────────
+    _progress(0, 3, "target_vsql_query", "running")
+    if target_config:
+        t_conn = None
+        try:
+            from app.services.dg_password_service import decrypt_dg_password
+            t_user = str(target_config.get("user") or "").strip()
+            t_pw = decrypt_dg_password(target_config.get("password") or "")
+            t_dsn = oracledb.makedsn(
+                target_config["host"],
+                int(target_config.get("port") or 1521),
+                sid=target_config.get("sid") or target_config.get("service_name") or "",
+            )
+            t_conn = oracledb.connect(user=t_user, password=t_pw, dsn=t_dsn)
+            t_cur = t_conn.cursor()
+            case4_sql = _read_sql_template("step4.txt") or _read_sql_template("case4.txt")
+            if case4_sql.strip():
+                q4 = case4_sql.strip().rstrip(";")
+                t_cur.execute(q4)
+            else:
+                t_cur.execute("""
+                    SELECT sql_id, plan_hash_value, executions,
+                           (elapsed_time/1000000) AS elapsed_us_to_sec,
+                           CASE WHEN executions = 0 THEN NULL
+                                ELSE ((elapsed_time/executions)/1000000) END AS per_elapse_sec,
+                           hash_value AS sql_hash,
+                           RAWTOHEX(address) AS sql_addr,
+                           sql_fulltext
+                    FROM v$sql
+                    WHERE upper(sql_text) LIKE upper('BEGIN qs_sql_test_proc1%')
+                       OR upper(sql_text) LIKE upper('BEGIN qs_sql_test_proc2%')
+                       OR upper(sql_text) LIKE upper('BEGIN qs_sql_test_proc3%')
+                       OR upper(sql_text) LIKE upper('BEGIN qs_sql_test_proc4%')
+                       OR upper(sql_text) LIKE upper('BEGIN qs_sql_test_proc5%')
+                    ORDER BY
+                        CASE WHEN upper(sql_text) LIKE upper('BEGIN qs_sql_test_proc1%') THEN 1
+                             WHEN upper(sql_text) LIKE upper('BEGIN qs_sql_test_proc2%') THEN 2
+                             WHEN upper(sql_text) LIKE upper('BEGIN qs_sql_test_proc3%') THEN 3
+                             WHEN upper(sql_text) LIKE upper('BEGIN qs_sql_test_proc4%') THEN 4
+                             WHEN upper(sql_text) LIKE upper('BEGIN qs_sql_test_proc5%') THEN 5
+                             ELSE 6 END, plan_hash_value
+                """)
+            result_data["target_vsql"] = _fetch_dict_rows(t_cur)
+            t_cur.close()
+            _progress(1, 3, "target_vsql_query", "pass")
+        except Exception as e:
+            result_data["target_vsql_error"] = str(e)
+            _progress(1, 3, "target_vsql_query", "fail")
+        finally:
+            try:
+                if t_conn:
+                    t_conn.close()
+            except Exception:
+                pass
+    else:
+        _progress(1, 3, "target_vsql_query", "skip")
+
+    # ── VSQL Repo 조회 ──────────────────────────────────────────────
+    _progress(1, 3, "repo_query_vsql", "running")
+    repo_conn = None
+    repo_cur = None
+    try:
+        repo_cfg = get_db_config("repo") or {}
+        repo_engine = _infer_db_engine(repo_cfg, "postgresql")
+        result_data["repo_engine"] = repo_engine
+        schema_override = str(repo_schema_name or "").strip()
+        schema_name = _safe_pg_schema(schema_override if schema_override else repo_cfg.get("schema_name"))
+        result_data["repo_schema"] = schema_name
+
+        pg_case_order = (
+            "CASE a.sql_id "
+            + " ".join([f"WHEN '{sid}' THEN {i}" for i, sid in enumerate(fixed_sql_ids, 1)])
+            + " ELSE 999 END"
+        )
+
+        if repo_engine == "oracle":
+            tmpl = _read_sql_template("ora_step5.txt") or _read_sql_template("ora_case5.txt")
+            if tmpl.strip():
+                parts = [p.strip() for p in tmpl.split(";") if p.strip().upper().startswith("SELECT")]
+                if len(parts) >= 2:
+                    q_elapse = parts[0].replace("${db_id_list}", db_id_list_str).replace("${partition_date}", partition_date).replace("${logging_time}", logging_time_str)
+                    q_stat   = parts[1].replace("${db_id_list}", db_id_list_str).replace("${partition_date}", partition_date).replace("${logging_time}", logging_time_str)
+                else:
+                    q_elapse = q_stat = None
+            else:
+                q_elapse = q_stat = None
+            if not q_elapse:
+                q_elapse = f"""
+                    SELECT a.db_id, b.instance_name, a.sql_id, a.sql_hash, a.sql_addr, a.sql_plan_hash,
+                           count(*) AS execution_count,
+                           sum(a.ELAPSE)/1000 AS total_elapse_sec,
+                           (sum(a.ELAPSE)/count(*))/1000 AS per_elapse_ms_to_sec
+                    FROM ora_sql_elapse a, apm_db_info b
+                    WHERE a.db_id = b.db_id AND a.db_id IN ({db_id_list_str})
+                      AND a.partition_key > TO_NUMBER('{partition_date}' || '000')
+                      AND a.time >= TO_TIMESTAMP('{logging_time_str}', 'YYYY-MM-DD HH24:MI:SS')
+                      AND a.sql_id in ({sql_id_filter})
+                    GROUP BY a.db_id, b.instance_name, a.sql_id, a.sql_hash, a.sql_addr, a.sql_plan_hash
+                    ORDER BY a.db_id, {sql_id_order_expr}, a.sql_plan_hash
+                """
+                q_stat = f"""
+                    SELECT a.db_id, b.instance_name, a.time, a.sql_id, a.sql_hash, a.sql_addr, a.sql_plan_hash,
+                           a.execution_count,
+                           (a.elapsed_time/100) AS elapse_cs_to_sec,
+                           CASE WHEN a.execution_count < 1 THEN NULL ELSE ((a.elapsed_time/a.execution_count)/100) END AS per_elapse_sec
+                    FROM ora_sql_stat_10min a, apm_db_info b
+                    WHERE a.db_id = b.db_id AND a.db_id IN ({db_id_list_str})
+                      AND a.partition_key > TO_NUMBER('{partition_date}' || '000')
+                      AND a.time >= TO_TIMESTAMP('{logging_time_str}', 'YYYY-MM-DD HH24:MI:SS')
+                      AND a.sql_id in ({sql_id_filter})
+                    ORDER BY a.time, a.db_id, {sql_id_order_expr}, a.time, a.sql_plan_hash
+                """
+        else:
+            tmpl = _read_sql_template("pg_step5.txt") or _read_sql_template("pg_case5.txt")
+            if tmpl.strip():
+                parts = [p.strip() for p in tmpl.split(";") if p.strip().upper().startswith("SELECT")]
+                if len(parts) >= 2:
+                    q_elapse = parts[0].replace("${schema_name}", schema_name).replace("${partition_date}", partition_date).replace("${logging_time}", f"'{logging_time_str}'")
+                    q_stat   = parts[1].replace("${schema_name}", schema_name).replace("${partition_date}", partition_date).replace("${logging_time}", f"'{logging_time_str}'")
+                else:
+                    q_elapse = q_stat = None
+            else:
+                q_elapse = q_stat = None
+            if not q_elapse:
+                q_elapse = f"""
+                    SELECT a.db_id, b.instance_name, a.sql_id, a.sql_hash, a.sql_addr, a.sql_plan_hash,
+                           count(*) as execution_count,
+                           sum(a.elapse)/1000.0 AS total_elapse_sec,
+                           (sum(a.elapse)/count(*))/1000.0 AS per_elapse_ms_to_sec
+                    FROM {schema_name}.ora_sql_elapse a, public.apm_db_info b
+                    WHERE a.db_id = b.db_id AND a.db_id IN ({db_id_list_str})
+                      AND a.partition_key > {partition_date}000
+                      AND a.time >= '{logging_time_str}'::timestamp
+                      AND a.sql_id in ({sql_id_filter})
+                    GROUP BY a.db_id, b.instance_name, a.sql_id, a.sql_hash, a.sql_addr, a.sql_plan_hash
+                    ORDER BY a.db_id, {pg_case_order}, a.sql_plan_hash
+                """
+                q_stat = f"""
+                    SELECT a.db_id, b.instance_name, a.time, a.sql_id, a.sql_hash, a.sql_addr, a.sql_plan_hash,
+                           a.execution_count,
+                           (a.elapsed_time/100.0) AS elapse_cs_to_sec,
+                           CASE WHEN a.execution_count < 1 THEN NULL ELSE ((a.elapsed_time/a.execution_count)/100.0) END AS per_elapse_sec
+                    FROM {schema_name}.ora_sql_stat_10min a, public.apm_db_info b
+                    WHERE a.db_id = b.db_id AND a.db_id IN ({db_id_list_str})
+                      AND a.partition_key > {partition_date}000
+                      AND a.time >= '{logging_time_str}'::timestamp
+                      AND a.sql_id in ({sql_id_filter})
+                    ORDER BY a.db_id, {pg_case_order}, a.time, a.sql_plan_hash
+                """
+
+        repo_conn = get_connection("repo")
+        repo_cur = repo_conn.cursor()
+        result_data["repo_elapse"] = _query_rows_with_retry(repo_cur, q_elapse, max_attempts=4, wait_seconds=8)
+        result_data["repo_stat"]   = _query_rows_with_retry(repo_cur, q_stat,   max_attempts=4, wait_seconds=10)
+        result_data["repo_elapse_vsql"] = result_data["repo_elapse"]
+        result_data["repo_stat_vsql"]   = result_data["repo_stat"]
+        _progress(2, 3, "repo_query_vsql", "pass")
+    except Exception as e:
+        overall_status = "error"
+        error_msg = f"VSQL Repo Error: {str(e)}"
+        _progress(2, 3, "repo_query_vsql", "fail")
+    finally:
+        try:
+            repo_cur.close()
+        except Exception:
+            pass
+        try:
+            release_connection("repo", repo_conn)
+        except Exception:
+            pass
+
+    # ── POL Repo 조회 ──────────────────────────────────────────────
+    if pol_repo_config_id and overall_status != "error":
+        pol_conn = None
+        pol_cur = None
+        try:
+            from app.shared_db import connect_repo_by_config_id
+            pol_conn, pol_cfg = connect_repo_by_config_id(pol_repo_config_id)
+            pol_cur = pol_conn.cursor()
+            pol_engine = _infer_db_engine(pol_cfg, "postgresql")
+            pol_schema = _safe_pg_schema(pol_repo_schema_name or pol_cfg.get("schema_name"))
+            pol_id_list = _safe_db_id_list(pol_repo_db_id_list, int(db_id))
+            result_data["pol_repo_engine"] = pol_engine
+            result_data["pol_repo_schema"] = pol_schema
+            result_data["pol_repo_db_id_list"] = pol_id_list
+
+            pg_case_order_pol = (
+                "CASE a.sql_id "
+                + " ".join([f"WHEN '{sid}' THEN {i}" for i, sid in enumerate(fixed_sql_ids, 1)])
+                + " ELSE 999 END"
+            )
+
+            if pol_engine == "oracle":
+                tmpl = _read_sql_template("ora_step5.txt") or _read_sql_template("ora_case5.txt")
+                if tmpl.strip():
+                    parts = [p.strip() for p in tmpl.split(";") if p.strip().upper().startswith("SELECT")]
+                    if len(parts) >= 2:
+                        pq_e = parts[0].replace("${db_id_list}", pol_id_list).replace("${partition_date}", partition_date).replace("${logging_time}", logging_time_str)
+                        pq_s = parts[1].replace("${db_id_list}", pol_id_list).replace("${partition_date}", partition_date).replace("${logging_time}", logging_time_str)
+                    else:
+                        pq_e = pq_s = None
+                else:
+                    pq_e = pq_s = None
+                if not pq_e:
+                    pq_e = f"""
+                        SELECT a.db_id, b.instance_name, a.sql_id, a.sql_hash, a.sql_addr, a.sql_plan_hash,
+                               count(*) AS execution_count,
+                               sum(a.ELAPSE)/1000 AS total_elapse_sec,
+                               (sum(a.ELAPSE)/count(*))/1000 AS per_elapse_ms_to_sec
+                        FROM ora_sql_elapse a, apm_db_info b
+                        WHERE a.db_id = b.db_id AND a.db_id IN ({pol_id_list})
+                          AND a.partition_key > TO_NUMBER('{partition_date}' || '000')
+                          AND a.time >= TO_TIMESTAMP('{logging_time_str}', 'YYYY-MM-DD HH24:MI:SS')
+                          AND a.sql_id in ({sql_id_filter})
+                        GROUP BY a.db_id, b.instance_name, a.sql_id, a.sql_hash, a.sql_addr, a.sql_plan_hash
+                        ORDER BY a.db_id, {sql_id_order_expr}, a.sql_plan_hash
+                    """
+                    pq_s = f"""
+                        SELECT a.db_id, b.instance_name, a.time, a.sql_id, a.sql_hash, a.sql_addr, a.sql_plan_hash,
+                               a.execution_count,
+                               (a.elapsed_time/100) AS elapse_cs_to_sec,
+                               CASE WHEN a.execution_count < 1 THEN NULL ELSE ((a.elapsed_time/a.execution_count)/100) END AS per_elapse_sec
+                        FROM ora_sql_stat_10min a, apm_db_info b
+                        WHERE a.db_id = b.db_id AND a.db_id IN ({pol_id_list})
+                          AND a.partition_key > TO_NUMBER('{partition_date}' || '000')
+                          AND a.time >= TO_TIMESTAMP('{logging_time_str}', 'YYYY-MM-DD HH24:MI:SS')
+                          AND a.sql_id in ({sql_id_filter})
+                        ORDER BY a.time, a.db_id, {sql_id_order_expr}, a.time, a.sql_plan_hash
+                    """
+            else:
+                tmpl = _read_sql_template("pg_step5.txt") or _read_sql_template("pg_case5.txt")
+                if tmpl.strip():
+                    parts = [p.strip() for p in tmpl.split(";") if p.strip().upper().startswith("SELECT")]
+                    if len(parts) >= 2:
+                        pq_e = parts[0].replace("${schema_name}", pol_schema).replace("${partition_date}", partition_date).replace("${logging_time}", f"'{logging_time_str}'")
+                        pq_s = parts[1].replace("${schema_name}", pol_schema).replace("${partition_date}", partition_date).replace("${logging_time}", f"'{logging_time_str}'")
+                    else:
+                        pq_e = pq_s = None
+                else:
+                    pq_e = pq_s = None
+                if not pq_e:
+                    pq_e = f"""
+                        SELECT a.db_id, b.instance_name, a.sql_id, a.sql_hash, a.sql_addr, a.sql_plan_hash,
+                               count(*) as execution_count,
+                               sum(a.elapse)/1000.0 AS total_elapse_sec,
+                               (sum(a.elapse)/count(*))/1000.0 AS per_elapse_ms_to_sec
+                        FROM {pol_schema}.ora_sql_elapse a, public.apm_db_info b
+                        WHERE a.db_id = b.db_id AND a.db_id IN ({pol_id_list})
+                          AND a.partition_key > {partition_date}000
+                          AND a.time >= '{logging_time_str}'::timestamp
+                          AND a.sql_id in ({sql_id_filter})
+                        GROUP BY a.db_id, b.instance_name, a.sql_id, a.sql_hash, a.sql_addr, a.sql_plan_hash
+                        ORDER BY a.db_id, {pg_case_order_pol}, a.sql_plan_hash
+                    """
+                    pq_s = f"""
+                        SELECT a.db_id, b.instance_name, a.time, a.sql_id, a.sql_hash, a.sql_addr, a.sql_plan_hash,
+                               a.execution_count,
+                               (a.elapsed_time/100.0) AS elapse_cs_to_sec,
+                               CASE WHEN a.execution_count < 1 THEN NULL ELSE ((a.elapsed_time/a.execution_count)/100.0) END AS per_elapse_sec
+                        FROM {pol_schema}.ora_sql_stat_10min a, public.apm_db_info b
+                        WHERE a.db_id = b.db_id AND a.db_id IN ({pol_id_list})
+                          AND a.partition_key > {partition_date}000
+                          AND a.time >= '{logging_time_str}'::timestamp
+                          AND a.sql_id in ({sql_id_filter})
+                        ORDER BY a.db_id, {pg_case_order_pol}, a.time, a.sql_plan_hash
+                    """
+
+            result_data["repo_elapse_pol"] = _query_rows_with_retry(pol_cur, pq_e, max_attempts=4, wait_seconds=8)
+            result_data["repo_stat_pol"]   = _query_rows_with_retry(pol_cur, pq_s, max_attempts=4, wait_seconds=10)
+            _progress(3, 3, "repo_query_pol", "pass")
+        except Exception as e:
+            result_data["pol_repo_error"] = str(e)
+            _progress(3, 3, "repo_query_pol", "fail")
+        finally:
+            try:
+                pol_cur.close()
+            except Exception:
+                pass
+            try:
+                pol_conn.close()
+            except Exception:
+                pass
+    else:
+        _progress(3, 3, "repo_query_pol", "skip")
+
+    # ── Step 6: SYS 정리 (target_config + sys_password 제공 시) ────────
+    clean_msg = "SYS password not provided; cleanup skipped"
+    if sys_password and target_config:
+        try:
+            from app.services.dg_password_service import decrypt_dg_password
+            tpw = decrypt_dg_password(target_config.get("password", ""))
+            target_user = str(target_config.get("user") or "").strip()
+            dsn6 = oracledb.makedsn(target_config["host"], int(target_config.get("port") or 1521), sid=target_config["sid"])
+            sys_conn = oracledb.connect(user="sys", password=sys_password, dsn=dsn6, mode=oracledb.SYSDBA)
+            scur = sys_conn.cursor()
+            step6_sql = _read_sql_template("step6.txt")
+            blocks = _split_oracle_blocks(step6_sql)
+            if blocks:
+                for b in blocks:
+                    exec_sql = b.replace("testuser_name := 'maxgauge';", f"testuser_name := '{target_user}';")
+                    exec_sql = exec_sql.replace("test_db_user varchar2(20) := 'maxgauge';", f"test_db_user varchar2(20) := '{target_user}';")
+                    if exec_sql.strip().endswith(";"):
+                        exec_sql = exec_sql.strip()[:-1]
+                    scur.execute(exec_sql)
+            else:
+                scur.execute(f"""
+                    DECLARE testuser_name varchar2(64) := '{target_user}';
+                    BEGIN
+                        EXECUTE IMMEDIATE 'DROP PROCEDURE ' || testuser_name || '.qs_sql_test_proc1';
+                        EXECUTE IMMEDIATE 'DROP PROCEDURE ' || testuser_name || '.qs_sql_test_proc2';
+                        EXECUTE IMMEDIATE 'DROP PROCEDURE ' || testuser_name || '.qs_sql_test_proc3';
+                        EXECUTE IMMEDIATE 'DROP PROCEDURE ' || testuser_name || '.qs_sql_test_proc4';
+                        EXECUTE IMMEDIATE 'DROP PROCEDURE ' || testuser_name || '.qs_sql_test_proc5';
+                    END;
+                """)
+            sys_conn.commit()
+            scur.close()
+            sys_conn.close()
+            clean_msg = "SYS shared pool purge + drop procedures success"
+        except Exception as e:
+            clean_msg = f"SYS cleanup failed: {e}"
     result_data["cleanup_info"] = clean_msg
 
     return {

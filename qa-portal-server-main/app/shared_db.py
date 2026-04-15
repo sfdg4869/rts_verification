@@ -133,18 +133,27 @@ def _normalize_service_type(value: Optional[str]) -> Optional[str]:
 
 
 def _connect_postgres_db(config: Dict[str, Any]):
-    from app.services.postgresql_service import PostgreSQLService
-    normalized = {
-        'host': config.get('host', 'localhost'),
-        'port': int(config.get('port', config.get('db_port', 5432)) or 5432),
-        'database': config.get('database') or config.get('service') or '',
-        'user': config.get('user') or config.get('db_user') or '',
-        'password': config.get('password') or config.get('db_password') or '',
-    }
-    conn = PostgreSQLService(normalized).connect()
-    if conn is None:
-        raise ValueError("PostgreSQL 연결 실패")
-    return conn
+    """
+    connect_repo_by_config_id 전용: 풀이 아닌 직접(direct) 연결을 반환한다.
+    호출자가 conn.close()로 반납하면 되므로 풀 고갈 문제가 없다.
+    """
+    import psycopg2
+    from app.services.dg_password_service import decrypt_dg_password
+    host     = config.get('host', 'localhost')
+    port     = int(config.get('port', config.get('db_port', 5432)) or 5432)
+    database = config.get('database') or config.get('service') or ''
+    user     = config.get('user') or config.get('db_user') or ''
+    raw_pw   = config.get('password') or config.get('db_password') or ''
+    password = decrypt_dg_password(raw_pw)
+    try:
+        return psycopg2.connect(
+            host=host, port=port, database=database,
+            user=user, password=password, sslmode='disable',
+        )
+    except Exception as e:
+        raise ValueError(
+            f"PostgreSQL 연결 실패 ({user}@{host}:{port}/{database or '(database 미지정)'}): {e}"
+        ) from e
 
 
 def _build_oracle_dsn(config: Dict[str, Any]) -> str:

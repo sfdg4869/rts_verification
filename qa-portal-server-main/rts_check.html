@@ -417,6 +417,17 @@ input::placeholder { color: var(--theme-text-muted); }
           <option value="stop_at_first_failure">stop_at_first_failure — 첫 실패에서 중단</option>
         </select>
       </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <label>rtsctl stop 검증</label>
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:400">
+          <input type="checkbox" id="verifyStop" style="width:16px;height:16px;cursor:pointer">
+          <span>점검 후 <b>rtsctl stop</b> 실행 및 종료 확인</span>
+        </label>
+        <div id="stopWaitSecWrap" style="display:none;margin-top:4px">
+          <label style="font-size:.8rem;color:var(--text2)">stop 대기 시간 (초)</label>
+          <input id="stopWaitSec" type="number" value="10" min="1" max="120" style="width:80px">
+        </div>
+      </div>
     </div>
   </div>
 
@@ -445,6 +456,7 @@ input::placeholder { color: var(--theme-text-muted); }
       <span class="step-label">5. CPU/MEM</span>
       <span class="step-label">6. 비정상 종료 시그널</span>
       <span class="step-label">7. Target 조회(v$sql)</span>
+      <span class="step-label" id="stepLabelStopVerify" style="display:none;color:var(--warn)">8. rtsctl stop 검증</span>
     </div>
     <div class="status-msg" style="color:var(--text2);margin:8px 0 6px">Repo 점검 항목 (SQL)</div>
     <div class="step-labels">
@@ -542,9 +554,16 @@ input::placeholder { color: var(--theme-text-muted); }
         <input id="repoLoggingTime" placeholder="예: 2026-04-13 12:30:00">
       </div>
     </div>
-    <div class="btn-row">
-      <button class="btn btn-primary" id="btnRunRepoNew" style="background:#0a3a40;">Repo 점검 항목_신규 실행</button>
+    <div class="btn-row" style="flex-wrap:wrap;gap:8px">
+      <button class="btn btn-primary" id="btnRunRepoNew" style="background:#0a3a40;">전체 실행 (Step1~6)</button>
+      <button class="btn btn-secondary" id="btnRunRepoSteps14" style="background:#145a32;color:#fff;">Target만 실행 (Step1~4)</button>
+      <button class="btn btn-secondary" id="btnRunRepoStep5" style="background:#1a5276;color:#fff;">Repo만 조회 (Step5~6)</button>
       <input type="password" id="sysPassword" placeholder="SYS 비밀번호(선택)" style="width: 160px;">
+    </div>
+    <div style="font-size:.78rem;color:var(--text2);margin-top:4px">
+      ① <b>Target만 실행</b>: 프로시저 생성·실행 (Step1~4) &nbsp;→&nbsp;
+      ② MaxGauge 수집 대기 (최대 10분) &nbsp;→&nbsp;
+      ③ <b>Repo만 조회</b>: Repo 조회 + 정리 (Step5~6)
     </div>
     <div id="repoNewStatus" class="status-msg hidden" style="margin-top:10px;font-size:.9rem"></div>
     <div id="repoNewResultWrap" style="margin-top:14px"></div>
@@ -605,6 +624,75 @@ let repoStep5Engine = '';
 /** 두번째(POL) Repo 엔진(소문자). 카드5 표시 분기에 사용: oracle | postgresql */
 let _polRepoEngine = '';
 const THEME_KEY = 'rts-check-theme';
+/** Step1~4 완료 후 "Repo만 조회" 권장 시각 카운트다운 타이머 */
+let _repoCountdownTimer = null;
+
+/**
+ * logging_time(서버 기록 시각) 기준으로 ORA_SQL_STAT_10MIN 조회 권장 시각 계산.
+ * - 프로시저 실행 예상 소요: ~8분
+ * - 다음 10분 버킷 경계 + 2분 버퍼
+ */
+function calcRecommendedQueryTime(loggingTimeStr) {
+  const dt = new Date(loggingTimeStr.replace(' ', 'T'));
+  if (isNaN(dt.getTime())) return null;
+  const PROC_MS = 8 * 60 * 1000;          // 프로시저 예상 소요 8분
+  const BUFFER_MS = 2 * 60 * 1000;        // MaxGauge 기록 버퍼 2분
+  const estEnd = new Date(dt.getTime() + PROC_MS);
+  const m = estEnd.getMinutes();
+  const remMins = m % 10 === 0 ? 0 : (10 - (m % 10));
+  const nextBoundary = new Date(estEnd.getTime() + remMins * 60 * 1000);
+  nextBoundary.setSeconds(0, 0);
+  return new Date(nextBoundary.getTime() + BUFFER_MS);
+}
+
+/**
+ * Step1~4 완료 후 권장 시각까지 카운트다운을 status 영역에 표시.
+ * 시각이 되면 "Repo만 조회" 버튼을 강조한다.
+ */
+function _startRepoQueryCountdown(targetTime, loggingTimeStr, statusEl) {
+  if (_repoCountdownTimer) { clearInterval(_repoCountdownTimer); _repoCountdownTimer = null; }
+  const pad = n => String(n).padStart(2, '0');
+  const hhmm = `${pad(targetTime.getHours())}:${pad(targetTime.getMinutes())}`;
+  const ltShort = loggingTimeStr ? loggingTimeStr.slice(11, 16) : '';
+  const btn5 = $('btnRunRepoStep5');
+
+  function _tick() {
+    const remaining = targetTime.getTime() - Date.now();
+    if (remaining <= 0) {
+      clearInterval(_repoCountdownTimer);
+      _repoCountdownTimer = null;
+      if (statusEl) {
+        statusEl.style.color = '#e65100';
+        statusEl.innerHTML =
+          `⏰ <b>${hhmm}</b> 도달 — 지금 <b>[Repo만 조회]</b> 버튼을 누르세요!`;
+      }
+      if (btn5) {
+        btn5.style.background = '#e65100';
+        btn5.style.boxShadow = '0 0 8px #e65100';
+      }
+    } else {
+      const totalSec = Math.ceil(remaining / 1000);
+      const min = Math.floor(totalSec / 60);
+      const sec = totalSec % 60;
+      if (statusEl) {
+        statusEl.style.color = 'var(--text2)';
+        statusEl.innerHTML =
+          `Step1~4 완료 (시작: ${ltShort}) &nbsp;|&nbsp; ` +
+          `<b>${hhmm}</b>에 [Repo만 조회] 가능 &nbsp;— &nbsp;` +
+          `<b style="color:#1a73e8;">${min}분 ${sec}초</b> 남음`;
+      }
+    }
+  }
+  _tick();
+  _repoCountdownTimer = setInterval(_tick, 1000);
+}
+
+/** 카운트다운 정지 및 버튼 원래 색상 복원 */
+function _stopRepoQueryCountdown() {
+  if (_repoCountdownTimer) { clearInterval(_repoCountdownTimer); _repoCountdownTimer = null; }
+  const btn5 = $('btnRunRepoStep5');
+  if (btn5) { btn5.style.background = '#1a5276'; btn5.style.boxShadow = ''; }
+}
 
 const $ = id => document.getElementById(id);
 
@@ -1154,6 +1242,8 @@ $('btnRun').onclick = async () => {
     ssh_password: $('sshPassword').value,
     ssh_port: parseInt($('sshPort').value) || 22,
     on_failure: $('onFailure').value,
+    verify_stop: $('verifyStop').checked,
+    stop_wait_sec: parseInt($('stopWaitSec').value) || 10,
   };
   const cn = $('confName').value.trim();
   const bd = $('baseDir').value.trim();
@@ -1745,6 +1835,7 @@ const STEP_NAMES = {
   target_create_minitest_proc: 'Target 3. QS_SQL_MINITEST_PROC 생성',
   target_run_minitest_block: 'Target 4. 미니테스트 블록 실행',
   target_query_result_step7: '7. Target 조회(v$sql 결과)',
+  rtsctl_stop_verify: '8. rtsctl stop 검증',
 };
 
 function badge(status) {
@@ -1916,6 +2007,116 @@ $('btnRunRepoNew').onclick = async () => {
   } catch (e) {
     st.classList.remove('hidden');
     st.style.color = 'var(--fail)';
+    st.textContent = '요청 실패: ' + (e?.message || String(e));
+  } finally { btn.disabled = false; }
+};
+
+// ─── 공통: job 폴링 헬퍼 ────────────────────
+async function _pollRepoJob(jobId, labelPrefix, totalSteps, st) {
+  while (true) {
+    await new Promise(r => setTimeout(r, 1000));
+    const sres = await fetch(`${API_RTS}/run-repo-new-job/${jobId}`);
+    const job = await sres.json().catch(() => ({}));
+    if (!sres.ok) throw new Error(job.error || 'job status failed');
+    const done = job.completed_steps || 0;
+    const total = job.total_steps || totalSteps;
+    const pct = job.progress_pct || 0;
+    const step = job.current_step || '-';
+    st.innerHTML = `<span class="spinner"></span> ${escHtml(labelPrefix)} ${done}/${total} (${pct}%) — ${escHtml(step)}`;
+    if (job.status === 'done') return job;
+    if (job.status === 'error') throw new Error(job.error || 'job failed');
+  }
+}
+
+// ─── Target만 실행 (Step1~4) ────────────────────
+$('btnRunRepoSteps14').onclick = async () => {
+  const btn = $('btnRunRepoSteps14');
+  const st = $('repoNewStatus');
+  if (!selectedRow?.db_id) {
+    st.classList.remove('hidden'); st.style.color = 'var(--fail)'; st.textContent = 'Step 2에서 Target DB를 먼저 선택해주세요.'; return;
+  }
+  btn.disabled = true;
+  st.classList.remove('hidden'); st.style.color = 'var(--text2)'; st.innerHTML = '<span class="spinner"></span> Target Step1~4 Job 시작 중...';
+  try {
+    const targetPassword = ($('targetPassword')?.value || '');
+    const sysPassword = ($('sysPassword')?.value || '');
+    const body = {
+      db_id: selectedRow.db_id,
+      target_config: { host: selectedRow.host_ip, port: selectedRow.lsnr_port||1521, user: selectedRow.db_user, password: targetPassword, sid: selectedRow.sid },
+      sys_password: sysPassword,
+    };
+    const res = await fetch(`${API_RTS}/run-repo-steps14-job`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)
+    });
+    const started = await res.json().catch(() => ({}));
+    if (!res.ok || !started.job_id) throw new Error(started.error || 'job start failed');
+    const job = await _pollRepoJob(started.job_id, 'Target 실행 중...', 4, st);
+    // Step1~4 결과에서 logging_time / partition_date 자동 채우기
+    const d14 = (job.result || {}).data || {};
+    if (d14.logging_time) {
+      const ltInp = $('repoLoggingTime');
+      if (ltInp) { ltInp.value = d14.logging_time; ltInp.style.background = '#fffde7'; }
+    }
+    if (d14.partition_date) {
+      const pdInp = $('repoPartitionDate');
+      if (pdInp) { pdInp.value = d14.partition_date; pdInp.style.background = '#fffde7'; }
+    }
+    st.classList.remove('hidden');
+    // 권장 조회 시각 계산 → 카운트다운 시작
+    const recTime = d14.logging_time ? calcRecommendedQueryTime(d14.logging_time) : null;
+    if (recTime) {
+      _startRepoQueryCountdown(recTime, d14.logging_time, st);
+    } else {
+      st.style.color = 'var(--pass)';
+      const ltVal = d14.logging_time ? ` (logging_time: ${d14.logging_time})` : '';
+      st.textContent = `Step1~4 완료${ltVal}. MaxGauge 수집 대기 후 [Repo만 조회]를 누르세요.`;
+    }
+  } catch (e) {
+    st.classList.remove('hidden'); st.style.color = 'var(--fail)';
+    st.textContent = '요청 실패: ' + (e?.message || String(e));
+  } finally { btn.disabled = false; }
+};
+
+// ─── Repo만 조회 (Step5~6) ────────────────────
+$('btnRunRepoStep5').onclick = async () => {
+  const btn = $('btnRunRepoStep5');
+  const st = $('repoNewStatus');
+  if (!selectedRow?.db_id) {
+    st.classList.remove('hidden'); st.style.color = 'var(--fail)'; st.textContent = 'Step 2에서 Target DB를 먼저 선택해주세요.'; return;
+  }
+  _stopRepoQueryCountdown();  // 카운트다운 정지, 버튼 색상 복원
+  btn.disabled = true;
+  $('repoNewResultWrap').innerHTML = '';
+  st.classList.remove('hidden'); st.style.color = 'var(--text2)'; st.innerHTML = '<span class="spinner"></span> Repo Step5~6 Job 시작 중...';
+  try {
+    const targetPassword = ($('targetPassword')?.value || '');
+    const sysPassword = ($('sysPassword')?.value || '');
+    const body = {
+      db_id: selectedRow.db_id,
+      target_config: { host: selectedRow.host_ip, port: selectedRow.lsnr_port||1521, user: selectedRow.db_user, password: targetPassword, sid: selectedRow.sid },
+      sys_password: sysPassword,
+    };
+    const repoPartitionDate = ($('repoPartitionDate')?.value || '').trim();
+    const repoLoggingTime   = ($('repoLoggingTime')?.value || '').trim();
+    if (repoPartitionDate) body.repo_partition_date = repoPartitionDate;
+    if (repoLoggingTime)   body.repo_logging_time   = repoLoggingTime;
+    if (selectedPolRepoConfigId) {
+      body.pol_repo_config_id = selectedPolRepoConfigId;
+      const polSchemaVal = ($('polRepoSchemaName')?.value || '').trim();
+      const polDbIdVal   = ($('polRepoDbIdList')?.value  || '').trim();
+      if (polSchemaVal) body.pol_repo_schema_name = polSchemaVal;
+      if (polDbIdVal)   body.pol_repo_db_id_list  = polDbIdVal;
+    }
+    const res = await fetch(`${API_RTS}/run-repo-step5-job`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)
+    });
+    const started = await res.json().catch(() => ({}));
+    if (!res.ok || !started.job_id) throw new Error(started.error || 'job start failed');
+    const job = await _pollRepoJob(started.job_id, 'Repo Step5~6 조회 중...', 3, st);
+    st.classList.add('hidden');
+    renderNewRepoResultGrid(job.result || {});
+  } catch (e) {
+    st.classList.remove('hidden'); st.style.color = 'var(--fail)';
     st.textContent = '요청 실패: ' + (e?.message || String(e));
   } finally { btn.disabled = false; }
 };
@@ -2273,12 +2474,16 @@ function renderNewRepoResultGrid(json) {
     ? `${d.pol_repo_engine.toUpperCase()}${d.pol_repo_schema ? `/${d.pol_repo_schema}` : ''}`
     : (d.pol_repo_error ? `오류: ${d.pol_repo_error}` : '미선택');
   const targetTxt = selectedRow ? `${selectedRow.instance_name || selectedRow.instance || '-'} (DB_ID: ${selectedRow.db_id}, Host: ${selectedRow.host_ip})` : '알 수 없음';
+  const loggingTimeTxt = d.logging_time ? escHtml(d.logging_time) : '-';
+  const partitionDateTxt = d.partition_date ? escHtml(d.partition_date) : '-';
   const gridHtml = `
   <div style="font-size:12px; margin-bottom: 20px; font-family:-apple-system, sans-serif; overflow-x: auto;">
     <div style="margin-bottom: 10px; font-size: 14px; font-weight: bold; background: #e3f2fd; padding: 10px; border-radius: 4px; border-left: 4px solid #1a73e8; color: #333;">
       <span style="color: #1a73e8; margin-right: 5px;">[VSQL Repo]</span> <span style="font-weight: normal; margin-right: 20px;">${escHtml(vsqlRepoTxt)}</span>
       <span style="color: #d93025; margin-right: 5px;">[POL Repo]</span> <span style="font-weight: normal; margin-right: 20px;">${escHtml(polRepoTxt)}</span>
-      <span style="color: #1a73e8; margin-right: 5px;">[Target DB]</span> <span style="font-weight: normal;">${escHtml(targetTxt)}</span>
+      <span style="color: #1a73e8; margin-right: 5px;">[Target DB]</span> <span style="font-weight: normal; margin-right: 20px;">${escHtml(targetTxt)}</span>
+      <span style="color: #555; margin-right: 5px;">[조회 기준 시각]</span> <span style="font-weight: normal; color: #e65100;">${loggingTimeTxt}</span>
+      <span style="color: #555; margin-left: 16px; margin-right: 5px;">[Partition Date]</span> <span style="font-weight: normal; color: #e65100;">${partitionDateTxt}</span>
     </div>
     <div style="min-width: 1400px;">
       <table style="width:100%; border-collapse:collapse; text-align:left; border:1px solid #ccc;">
@@ -2328,6 +2533,13 @@ function renderNewRepoResultGrid(json) {
   `;
   content.innerHTML = gridHtml;
 }
+
+// ─── verifyStop 체크박스 — stopWaitSec 및 step label 표시/숨김 ───
+$('verifyStop').addEventListener('change', function() {
+  $('stopWaitSecWrap').style.display = this.checked ? 'block' : 'none';
+  const lbl = $('stepLabelStopVerify');
+  if (lbl) lbl.style.display = this.checked ? '' : 'none';
+});
 
 // ─── Init ──────────────────────────────────
 resetTargetDbArea();

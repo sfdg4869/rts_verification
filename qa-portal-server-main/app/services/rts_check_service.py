@@ -110,15 +110,15 @@ def _shell_quote(s: str) -> str:
 # 개별 점검 스텝
 # ────────────────────────────────────────────────────────
 
-def _log_root(base_dir: str, conf_name: str) -> str:
-    """로그 디렉터리 경로: {base_dir}/{conf_name}/log/maxgauge"""
-    return f"{base_dir}/{conf_name}/log/maxgauge"
+def _log_root(conf_dir: str) -> str:
+    """로그 디렉터리 경로: {conf_dir}/log/maxgauge"""
+    return f"{conf_dir}/log/maxgauge"
 
 
-def _step_log_dirs(ssh: _SSHSession, base_dir: str, conf_name: str) -> Dict[str, Any]:
-    """Step 1: {base_dir}/{conf_name}/log/maxgauge 아래 rts/sndf/obsd 이름이 포함된 로그 파일 존재 여부"""
+def _step_log_dirs(ssh: _SSHSession, conf_dir: str) -> Dict[str, Any]:
+    """Step 1: {conf_dir}/log/maxgauge 아래 rts/sndf/obsd 이름이 포함된 로그 파일 존재 여부"""
     t0 = time.time()
-    log_dir = _log_root(base_dir, conf_name)
+    log_dir = _log_root(conf_dir)
 
     out, err, rc = ssh.run(f"test -d {log_dir} && echo DIR_OK || echo DIR_MISSING")
     if "DIR_MISSING" in out:
@@ -150,18 +150,16 @@ def _step_log_dirs(ssh: _SSHSession, base_dir: str, conf_name: str) -> Dict[str,
     )
 
 
-def _mxgrc_prefix(base_dir: str, conf_name: str) -> str:
+def _mxgrc_prefix(conf_dir: str) -> str:
     """rtsctl 실행 전 필수 선행 명령: cd → . .mxgrc"""
-    conf_dir = f"{base_dir}/{conf_name}"
     return f"cd {conf_dir} && . ./.mxgrc"
 
 
-def _step_rtsctl_stat(ssh: _SSHSession, base_dir: str, conf_name: str) -> Tuple[Dict[str, Any], Dict[str, Optional[str]]]:
+def _step_rtsctl_stat(ssh: _SSHSession, conf_dir: str) -> Tuple[Dict[str, Any], Dict[str, Optional[str]]]:
     """Step 2: . .mxgrc 적용 후 rtsctl stat 로 rts/sndf/obsd RUNNING 여부 확인
     Returns: (step_result, pid_map)  — pid_map은 Step 3에서 사용
     """
     t0 = time.time()
-    conf_dir = f"{base_dir}/{conf_name}"
     mxgrc_file = f"{conf_dir}/.mxgrc"
 
     # .mxgrc 존재 확인
@@ -174,7 +172,7 @@ def _step_rtsctl_stat(ssh: _SSHSession, base_dir: str, conf_name: str) -> Tuple[
             _elapsed_ms(t0),
         ), pid_map
 
-    prefix = _mxgrc_prefix(base_dir, conf_name)
+    prefix = _mxgrc_prefix(conf_dir)
     out, err, rc = ssh.run(f"{prefix} && rtsctl stat 2>&1")
 
     combined = out + "\n" + err
@@ -252,6 +250,80 @@ def _step_pid_match(ssh: _SSHSession, conf_name: str, pid_map: Dict[str, Optiona
     return _step_result("pid_cross_check", status, evidence, _elapsed_ms(t0))
 
 
+def _step_rtsctl_stop_verify(
+    ssh: _SSHSession, conf_dir: str, conf_name: str,
+    stop_wait_sec: int = 10,
+) -> Dict[str, Any]:
+    """
+    rtsctl stop 수행 후 정상 중지 확인.
+
+    검증 항목:
+      1. rtsctl stop 실행
+      2. rtsctl stat → rts/sndf/obsd 모두 "does not exist" 확인
+      3. ps -ef | grep {conf_name} → 관련 PID 없음 확인
+    """
+    t0 = time.time()
+    prefix = _mxgrc_prefix(conf_dir)
+    evidence_lines: List[str] = []
+    failed: List[str] = []
+
+    # ── 1. rtsctl stop 실행 ──────────────────────────────────────────
+    stop_out, stop_err, stop_rc = ssh.run(f"{prefix} && rtsctl stop 2>&1")
+    stop_combined = (stop_out + "\n" + stop_err).strip()
+    evidence_lines.append(f"[rtsctl stop rc={stop_rc}] {stop_combined[:300]}")
+
+    # stop 완료까지 대기
+    if stop_wait_sec > 0:
+        time.sleep(stop_wait_sec)
+
+    # ── 2. rtsctl stat → "does not exist" 확인 ───────────────────────
+    stat_out, stat_err, _ = ssh.run(f"{_mxgrc_prefix(conf_dir)} && rtsctl stat 2>&1")
+    stat_combined = (stat_out + "\n" + stat_err)
+    evidence_lines.append(f"[rtsctl stat after stop]\n{stat_combined[:500]}")
+
+    daemon_status: Dict[str, str] = {}
+    for daemon in DAEMONS:
+        block_match = re.search(rf"(?is)\b{daemon}\b[^;\n]*", stat_combined)
+        block = block_match.group(0) if block_match else ""
+        block_low = block.lower()
+
+        if "does not exist" in block_low:
+            daemon_status[daemon] = "DOES_NOT_EXIST"
+        elif "not running" in block_low or "stopped" in block_low:
+            daemon_status[daemon] = "STOPPED"
+        elif "running" in block_low:
+            daemon_status[daemon] = "STILL_RUNNING"
+        else:
+            daemon_status[daemon] = block.strip() if block.strip() else "UNKNOWN"
+
+    stat_parts = [f"{d}: {s}" for d, s in daemon_status.items()]
+    evidence_lines.append("[stat check] " + "; ".join(stat_parts))
+
+    not_stopped = [d for d, s in daemon_status.items() if s not in ("DOES_NOT_EXIST", "STOPPED")]
+    if not_stopped:
+        failed.append(f"rtsctl stat: 중지 미확인 daemon={not_stopped}")
+
+    # ── 3. ps -ef | grep {conf_name} → PID 없음 확인 ─────────────────
+    safe_conf = _shell_quote(conf_name)
+    ps_out, _, _ = ssh.run(
+        f"ps -ef 2>/dev/null | grep {safe_conf} | grep -v grep || true"
+    )
+    ps_lines = [l for l in ps_out.strip().splitlines() if l.strip()]
+    if ps_lines:
+        evidence_lines.append(f"[ps check] FAIL — 아직 PID 존재:\n" + "\n".join(ps_lines[:10]))
+        failed.append(f"ps: {len(ps_lines)}개 프로세스 잔존")
+    else:
+        evidence_lines.append(f"[ps check] PASS — {conf_name} 관련 PID 없음")
+
+    status = "pass" if not failed else "fail"
+    return _step_result(
+        "rtsctl_stop_verify",
+        status,
+        "\n".join(evidence_lines),
+        _elapsed_ms(t0),
+    )
+
+
 def _find_latest_log(ssh: _SSHSession, log_dir: str, daemon: str) -> Optional[str]:
     """로그 디렉터리에서 daemon 이름이 포함된 로그 파일 경로를 반환(휴대성 우선)."""
     out, _, _ = ssh.run(
@@ -261,11 +333,11 @@ def _find_latest_log(ssh: _SSHSession, log_dir: str, daemon: str) -> Optional[st
     return path
 
 
-def _step_error_grep(ssh: _SSHSession, base_dir: str, conf_name: str) -> Dict[str, Any]:
-    """Step 4: {CONF_NAME}/log/{CONF_NAME}/ 에서 rts/sndf/obsd 로그의 SIGBUS 등 비정상 시그널 grep.
+def _step_error_grep(ssh: _SSHSession, conf_dir: str) -> Dict[str, Any]:
+    """Step 4: {conf_dir}/log/maxgauge/ 에서 rts/sndf/obsd 로그의 SIGBUS 등 비정상 시그널 grep.
     키워드가 없으면 PASS, 있으면 FAIL."""
     t0 = time.time()
-    log_dir = _log_root(base_dir, conf_name)
+    log_dir = _log_root(conf_dir)
     keyword_pattern = "|".join(_ABNORMAL_KEYWORDS)
     findings: List[str] = []
     error_samples: List[str] = []
@@ -355,10 +427,10 @@ def _step_resource_usage(ssh: _SSHSession, pid_map: Dict[str, Optional[str]]) ->
     return _step_result("resource_usage", "skip", "ps returned no data", _elapsed_ms(t0))
 
 
-def _step_abnormal_signals(ssh: _SSHSession, base_dir: str, conf_name: str) -> Dict[str, Any]:
-    """Step 6: {CONF_NAME}/log/{CONF_NAME}/ 에서 SIGBUS, SIGSEGV 등 비정상 종료 징후 검색"""
+def _step_abnormal_signals(ssh: _SSHSession, conf_dir: str) -> Dict[str, Any]:
+    """Step 6: {conf_dir}/log/maxgauge/ 에서 SIGBUS, SIGSEGV 등 비정상 종료 징후 검색"""
     t0 = time.time()
-    log_dir = _log_root(base_dir, conf_name)
+    log_dir = _log_root(conf_dir)
     keyword_pattern = "|".join(_ABNORMAL_KEYWORDS)
     findings: List[str] = []
     log_samples: List[str] = []
@@ -507,10 +579,13 @@ def _step_target_vsql_query(db_row: Dict[str, Any], host_override: Optional[str]
 # 공용 진입점
 # ────────────────────────────────────────────────────────
 
-def _resolve_base_dir(ssh: _SSHSession, conf_name: str, user_base_dir: Optional[str]) -> str:
+def _resolve_conf_dir(
+    ssh: _SSHSession, conf_name: str, user_base_dir: Optional[str]
+) -> Optional[str]:
     """
-    conf_name 설치 루트(base_dir) 자동 탐색.
-    서버마다 경로가 다를 수 있어 /home 외에도 /data*, /u01, /app 등에서 탐색한다.
+    conf_name 에 해당하는 MaxGauge conf 디렉터리(= .mxgrc 가 있는 곳)를 찾아 반환.
+    경로 어딘가에 conf_name 이 포함된 디렉터리를 탐색하며, .mxgrc 존재를 우선 기준으로 삼는다.
+    찾지 못하면 None 반환.
     """
     conf_q = _shell_quote(conf_name)
 
@@ -522,84 +597,91 @@ def _resolve_base_dir(ssh: _SSHSession, conf_name: str, user_base_dir: Optional[
         except Exception:
             return "", "error", 1
 
-    # 1) 사용자가 base_dir를 직접 준 경우:
-    #    - {base_dir}/{conf_name}가 존재하면 base_dir 사용
-    #    - base_dir 자체가 conf_name 디렉터리면 parent를 base_dir로 사용
+    def _has_mxgrc(d: str) -> bool:
+        cq = _shell_quote(d)
+        out, _, _ = _safe_run(f"test -f {cq}/.mxgrc && echo OK || echo NG", timeout=3)
+        return out.strip() == "OK"
+
+    # 고정 후보 + 서버의 실제 최상위 디렉토리를 동적으로 합쳐서 탐색 루트를 구성한다.
+    # /proc, /sys, /dev 등 가상 파일시스템은 제외한다.
+    SKIP_ROOTS = {"/proc", "/sys", "/dev", "/run", "/tmp", "/lost+found"}
+    fixed_roots = ["/data1", "/data2", "/data", "/mxg", "/maxgauge",
+                   "/u01", "/u02", "/app", "/home", "/opt", "/usr/local", "/export"]
+
+    # 서버 최상위 디렉토리 목록 가져오기
+    top_out, _, _ = _safe_run(
+        "ls -1d /*/  2>/dev/null | sed 's|/$||'",
+        timeout=5,
+    )
+    dynamic_roots = [
+        p.strip() for p in top_out.splitlines()
+        if p.strip() and p.strip() not in SKIP_ROOTS
+    ]
+    # 고정 후보를 앞에 두고 동적 목록으로 보완 (중복 제거, 순서 유지)
+    seen: set = set()
+    search_roots = []
+    for r in fixed_roots + dynamic_roots:
+        if r and r not in seen:
+            seen.add(r)
+            search_roots.append(r)
+
+    all_roots_str = " ".join(_shell_quote(r) for r in search_roots)
+
+    # 1) 사용자가 base_dir 또는 conf_dir를 직접 준 경우
     if user_base_dir:
         base = user_base_dir.rstrip("/")
-        base_q = _shell_quote(base)
-        out, _, _ = _safe_run(
-            f"if [ -d {base_q}/{conf_q} ]; then echo {base_q}; "
-            f"elif [ -d {base_q} ] && [ \"$(basename {base_q})\" = {conf_q} ]; then dirname {base_q}; "
-            f"fi",
-            timeout=4,
-        )
-        chosen = out.strip()
-        if chosen:
-            return chosen
-        return base
+        candidate = f"{base}/{conf_name}"
+        if _has_mxgrc(candidate):
+            return candidate
+        if _has_mxgrc(base):
+            return base
+        out, _, _ = _safe_run(f"test -d {_shell_quote(candidate)} && echo OK || echo NG", timeout=3)
+        return candidate if out.strip() == "OK" else base
 
-    # 2) 빠른 고정 경로 후보 우선 체크 (실서버 패턴 반영)
-    quick_candidates = [
-        f"/data1/maxgauge/QS1/{conf_name}",
-        f"/data1/maxgauge/{conf_name}",
-        f"/data/maxgauge/QS1/{conf_name}",
-        f"/data/maxgauge/{conf_name}",
-        f"/data2/maxgauge/QS1/{conf_name}",
-        f"/data2/maxgauge/{conf_name}",
-        f"/u01/{conf_name}",
-        f"/app/{conf_name}",
-        f"/home/{conf_name}",
-        f"/opt/{conf_name}",
-        f"/usr/local/{conf_name}",
-    ]
-    for cand in quick_candidates:
-        cand_q = _shell_quote(cand)
-        out_c, _, _ = _safe_run(f"test -d {cand_q} && echo {cand_q} || true", timeout=3)
-        found_c = out_c.strip()
-        if found_c:
-            return found_c.rsplit(f"/{conf_name}", 1)[0]
+    # 2) find로 .mxgrc 직접 탐색 — 경로에 conf_name 포함된 것
+    out_find, _, _ = _safe_run(
+        f"for R in {all_roots_str}; do"
+        f"  [ -d \"$R\" ] || continue;"
+        f"  find \"$R\" -maxdepth 10 -name '.mxgrc' 2>/dev/null | grep -F {conf_q};"
+        f"done | head -5",
+        timeout=30,
+    )
+    for line in out_find.strip().splitlines():
+        line = line.strip()
+        if line and conf_name in line and line.endswith("/.mxgrc"):
+            return line[: -len("/.mxgrc")]
 
-    # 3) 빠른 wildcard 탐색 (find 없이 0~3 depth 경로 체크)
-    search_roots = ["/data1", "/data2", "/data", "/u01", "/app", "/home", "/opt", "/usr/local"]
-    for root in search_roots:
-        root_q = _shell_quote(root)
-        out_g, _, _ = _safe_run(
-            "CONF="
-            + conf_q
-            + "; ROOT="
-            + root_q
-            + "; [ -d \"$ROOT\" ] || exit 0; "
-            + "for P in "
-            + "\"$ROOT\"/\"$CONF\" "
-            + "\"$ROOT\"/*/\"$CONF\" "
-            + "\"$ROOT\"/*/*/\"$CONF\" "
-            + "\"$ROOT\"/*/*/*/\"$CONF\"; "
-            + "do [ -d \"$P\" ] && echo \"$P\" && break; done",
-            timeout=4,
-        )
-        found_g = out_g.strip()
-        if found_g:
-            return found_g.rsplit(f"/{conf_name}", 1)[0]
+    # 3) rtsctl 바이너리 위치로 conf_dir 역추적
+    out_rtsc, _, _ = _safe_run(
+        f"for R in {all_roots_str}; do"
+        f"  [ -d \"$R\" ] || continue;"
+        f"  find \"$R\" -maxdepth 10 -name 'rtsctl' -type f 2>/dev/null | grep -F {conf_q};"
+        f"done | head -3",
+        timeout=25,
+    )
+    for line in out_rtsc.strip().splitlines():
+        line = line.strip()
+        if line and conf_name in line:
+            d = line.rsplit("/", 1)[0]
+            if d.endswith("/bin"):
+                d = d[:-4]
+            if _has_mxgrc(d):
+                return d
 
-    # 4) 마지막으로 루트별 find를 짧게 시도 (타임아웃 나도 다음 루트 계속)
-    for root in search_roots:
-        root_q = _shell_quote(root)
-        out_f, _, _ = _safe_run(
-            "CONF="
-            + conf_q
-            + "; ROOT="
-            + root_q
-            + "; [ -d \"$ROOT\" ] || exit 0; "
-            + "find \"$ROOT\" -type d -name \"$CONF\" 2>/dev/null | head -1",
-            timeout=5,
-        )
-        found_f = out_f.strip()
-        if found_f:
-            return found_f.rsplit(f"/{conf_name}", 1)[0]
+    # 4) .mxgrc 없어도 conf_name과 정확히 일치하는 디렉토리 반환 (최후 수단)
+    out_dir, _, _ = _safe_run(
+        f"for R in {all_roots_str}; do"
+        f"  [ -d \"$R\" ] || continue;"
+        f"  find \"$R\" -maxdepth 10 -type d -name {conf_q} 2>/dev/null;"
+        f"done | head -5",
+        timeout=25,
+    )
+    for line in out_dir.strip().splitlines():
+        line = line.strip()
+        if line:
+            return line
 
-    # 5) 마지막 fallback
-    return "/home"
+    return None
 
 
 def get_apm_db_row(db_id: int) -> Tuple[bool, Optional[Dict[str, Any]], str]:
@@ -662,6 +744,8 @@ def run_rts_check(
     base_dir: Optional[str] = None,
     host_override: Optional[str] = None,
     on_failure: str = "run_all",
+    verify_stop: bool = False,
+    stop_wait_sec: int = 10,
 ) -> Dict[str, Any]:
     """
     단일 호스트에 대한 RTS 점검을 수행한다.
@@ -673,6 +757,8 @@ def run_rts_check(
         base_dir: 설치 디렉터리 루트 (미지정 시 자동 탐색)
         host_override: HOST_IP 대신 사용할 호스트
         on_failure: "stop_at_first_failure" | "run_all"
+        verify_stop: True 이면 기존 점검 완료 후 rtsctl stop → 중지 검증 스텝 추가
+        stop_wait_sec: rtsctl stop 후 대기 초 (기본 10초)
 
     Returns:
         점검 결과 JSON dict
@@ -705,16 +791,24 @@ def run_rts_check(
         return result
 
     try:
-        resolved_base = _resolve_base_dir(ssh, resolved_conf, base_dir)
-        result["resolved_base_dir"] = resolved_base
+        resolved_conf_dir = _resolve_conf_dir(ssh, resolved_conf, base_dir)
+        if resolved_conf_dir is None:
+            result["overall_status"] = "error"
+            result["error"] = (
+                f"MaxGauge 설치 경로를 찾을 수 없습니다 (conf: {resolved_conf}). "
+                "서버에 직접 접속해 경로를 확인 후 'Base Dir' 필드에 입력해주세요."
+            )
+            result["total_duration_ms"] = _elapsed_ms(total_t0)
+            return result
+        result["resolved_conf_dir"] = resolved_conf_dir
         stop = on_failure == "stop_at_first_failure"
 
         step_funcs = [
-            lambda: _step_log_dirs(ssh, resolved_base, resolved_conf),
-            lambda: _step_rtsctl_stat(ssh, resolved_base, resolved_conf),
+            lambda: _step_log_dirs(ssh, resolved_conf_dir),
+            lambda: _step_rtsctl_stat(ssh, resolved_conf_dir),
             lambda: _step_pid_match(ssh, resolved_conf, pid_map),
-            lambda: _step_error_grep(ssh, resolved_base, resolved_conf),
-            lambda: _step_abnormal_signals(ssh, resolved_base, resolved_conf),
+            lambda: _step_error_grep(ssh, resolved_conf_dir),
+            lambda: _step_abnormal_signals(ssh, resolved_conf_dir),
         ]
 
         pid_map: Dict[str, Optional[str]] = {d: None for d in DAEMONS}
@@ -747,6 +841,21 @@ def run_rts_check(
 
         if any(s["status"] == "fail" for s in result["steps"]):
             result["overall_status"] = "fail"
+
+        # ── Stop 검증 스텝 (verify_stop=True 이고 기존 점검이 pass 인 경우만) ──
+        if verify_stop:
+            try:
+                stop_step = _step_rtsctl_stop_verify(
+                    ssh, resolved_conf_dir, resolved_conf, stop_wait_sec=stop_wait_sec
+                )
+            except Exception as e:
+                stop_step = _step_result(
+                    "rtsctl_stop_verify", "fail",
+                    f"exception: {_mask_sensitive(str(e))}", 0,
+                )
+            result["steps"].append(stop_step)
+            if stop_step["status"] == "fail":
+                result["overall_status"] = "fail"
 
     finally:
         ssh.close()
