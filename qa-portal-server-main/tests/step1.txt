@@ -3,23 +3,7 @@ SELECT * FROM USER_SYS_PRIVS WHERE privilege = 'ALTER SYSTEM';
 
 -- ALTER SYSTEM 권한 없으면 SYS 계정에서 아래와 같이 권한 별도로 부여해 줘야 함
 -- SYS > GRANT ALTER SYSTEM TO {계정명};
-
--- DBMS_LOCK 권한 있는지 확인 (아래 3개의 뷰에 권한 하나라도 있으면 됨)
-SELECT 'USER_TAB_PRIVS' AS source, privilege AS DBMS_LOCK_PRIVILEGE
-FROM user_tab_privs
-WHERE table_name = 'DBMS_LOCK' AND privilege = 'EXECUTE' 
-UNION all
-SELECT 'DBA_TAB_PRIVS' AS source, privilege AS DBMS_LOCK_PRIVILEGE
-FROM dba_tab_privs
-WHERE grantee = 'PUBLIC' AND table_name = 'DBMS_LOCK' AND privilege = 'EXECUTE'   
-UNION all
-SELECT 'USER_SYS_PRIVS' AS SOURCE, privilege AS DBMS_LOCK_PRIVILEGE
-FROM user_sys_privs
-WHERE privilege = 'EXECUTE ANY PROCEDURE';
-
--- DBMS_LOCK 권한 없으면 SYS 계정에서 아래와 같이 권한 별도로 부여해 줘야 함
--- SYS > GRANT EXECUTE ON DBMS_LOCK TO {계정명}; 
-
+ 
 -- DBMS_UTILITY 권한 있는지 확인 (아래 3개의 뷰에 권한 하나라도 있으면 됨)
 SELECT 'USER_TAB_PRIVS' AS source, privilege AS DBMS_UTILITY_PRIVILEGE
 FROM user_tab_privs
@@ -34,4 +18,10 @@ FROM user_sys_privs
 WHERE privilege = 'EXECUTE ANY PROCEDURE';
 
 -- DBMS_UTILITY 권한 없으면 SYS 계정에서 아래와 같이 권한 별도로 부여해 줘야 함
--- SYS > GRANT EXECUTE ON DBMS_UTILITY TO {계정명};
+-- SYS > GRANT EXECUTE ON DBMS_UTILITY TO {계정명}; 
+
+-- DBMS_SHARED_POOL 관련 권한이 있는지 확인
+SELECT * FROM session_privs WHERE PRIVILEGE LIKE '%DBMS%';
+
+-- DBMS_SHARED_POOL 관련 권한이 없으면 SYS 계정에서 아래와 같이 권한 별도로 부여해 줘야 함
+-- SYS > GRANT EXECUTE ON SYS.DBMS_SHARED_POOL TO {계정명};

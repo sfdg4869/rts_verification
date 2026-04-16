@@ -226,6 +226,9 @@ def run_new_repo_check(
     pol_repo_schema_name: Optional[str] = None,
     pol_repo_db_id_list: Optional[str] = None,
     stop_after_step4: bool = False,
+    ssh_user: Optional[str] = None,
+    ssh_password: Optional[str] = None,
+    ssh_port: int = 22,
 ) -> Dict[str, Any]:
     def _progress(done: int, total: int, step_name: str, step_status: str) -> None:
         if progress_callback:
@@ -320,50 +323,109 @@ def run_new_repo_check(
     try:
         cur = conn.cursor()
 
-        # Step 1: 권한 확인
+        # Step 1: 권한 확인 + 없으면 SSH로 자동 grant
+        import paramiko as _paramiko
+
+        def _ssh_grant(grant_sql: str, priv_label: str) -> tuple:
+            """SSH로 sqlplus / as sysdba 에 grant_sql 실행. (ok: bool, msg: str)"""
+            if not (ssh_user and ssh_password):
+                return False, f"{priv_label} 권한 없음 - SSH 접속 정보 필요: {grant_sql}"
+            try:
+                _progress(1, 6, f"target_permission_check({priv_label} grant via SSH)", "running")
+                _ssh = _paramiko.SSHClient()
+                _ssh.set_missing_host_key_policy(_paramiko.AutoAddPolicy())
+                _ssh.connect(
+                    hostname=target_config["host"],
+                    port=int(ssh_port),
+                    username=ssh_user,
+                    password=ssh_password,
+                    timeout=10,
+                )
+                cmd = f'echo "{grant_sql}" | sqlplus -S / as sysdba'
+                _, out_ch, err_ch = _ssh.exec_command(cmd, timeout=30)
+                out_ch.channel.recv_exit_status()
+                out = out_ch.read().decode(errors="replace").strip()
+                err = err_ch.read().decode(errors="replace").strip()
+                _ssh.close()
+                if "ORA-" in out or "ORA-" in err:
+                    raise RuntimeError(out or err)
+                return True, f"{priv_label} GRANT 완료 (SSH): {grant_sql}"
+            except Exception as _e:
+                return False, f"{priv_label} GRANT 실패 (SSH): {_e}"
+
+        def _check_priv(sql: str) -> bool:
+            cur.execute(sql)
+            return bool(_fetch_dict_rows(cur))
+
+        perm = {}
+
+        # 1-1. ALTER SYSTEM
         _progress(1, 6, "target_permission_check(ALTER_SYSTEM)", "running")
         alter_sql = "SELECT * FROM USER_SYS_PRIVS WHERE privilege = 'ALTER SYSTEM'"
-        lock_sql = (
-            "SELECT 'USER_TAB_PRIVS' AS source, privilege AS dbms_lock_privilege "
-            "FROM user_tab_privs WHERE table_name = 'DBMS_LOCK' AND privilege = 'EXECUTE' "
-            "UNION all "
-            "SELECT 'DBA_TAB_PRIVS' AS source, privilege AS dbms_lock_privilege "
-            "FROM dba_tab_privs WHERE grantee = 'PUBLIC' AND table_name = 'DBMS_LOCK' AND privilege = 'EXECUTE' "
-            "UNION all "
-            "SELECT 'USER_SYS_PRIVS' AS source, privilege AS dbms_lock_privilege "
-            "FROM user_sys_privs WHERE privilege = 'EXECUTE ANY PROCEDURE'"
-        )
+        alter_ok = _check_priv(alter_sql)
+        if not alter_ok:
+            ok, msg = _ssh_grant(f"GRANT ALTER SYSTEM TO {target_user};", "ALTER_SYSTEM")
+            alter_ok = ok
+            perm["alter_system_grant"] = msg
+            if alter_ok:
+                alter_ok = _check_priv(alter_sql)
+        perm["alter_system_ok"] = alter_ok
+
+        # 1-2. DBMS_UTILITY
+        _progress(1, 6, "target_permission_check(DBMS_UTILITY)", "running")
         util_sql = (
             "SELECT 'USER_TAB_PRIVS' AS source, privilege AS dbms_utility_privilege "
             "FROM user_tab_privs WHERE table_name = 'DBMS_UTILITY' AND privilege = 'EXECUTE' "
-            "UNION all "
+            "UNION ALL "
             "SELECT 'DBA_TAB_PRIVS' AS source, privilege AS dbms_utility_privilege "
             "FROM dba_tab_privs WHERE grantee = 'PUBLIC' AND table_name = 'DBMS_UTILITY' AND privilege = 'EXECUTE' "
-            "UNION all "
+            "UNION ALL "
             "SELECT 'USER_SYS_PRIVS' AS source, privilege AS dbms_utility_privilege "
             "FROM user_sys_privs WHERE privilege = 'EXECUTE ANY PROCEDURE'"
         )
-        cur.execute(alter_sql)
-        alter_rows = _fetch_dict_rows(cur)
-        _progress(1, 6, "target_permission_check(DBMS_LOCK)", "running")
-        cur.execute(lock_sql)
-        lock_rows = _fetch_dict_rows(cur)
-        _progress(1, 6, "target_permission_check(DBMS_UTILITY)", "running")
-        cur.execute(util_sql)
-        util_rows = _fetch_dict_rows(cur)
-        result_data["permission_checks"] = {
-            "alter_system_ok": bool(alter_rows),
-            "dbms_lock_ok": bool(lock_rows),
-            "dbms_utility_ok": bool(util_rows),
-            "alter_rows": alter_rows,
-            "dbms_lock_rows": lock_rows,
-            "dbms_utility_rows": util_rows,
-        }
-        if not (bool(alter_rows) and bool(lock_rows) and bool(util_rows)):
+        util_ok = _check_priv(util_sql)
+        if not util_ok:
+            ok, msg = _ssh_grant(f"GRANT EXECUTE ON DBMS_UTILITY TO {target_user};", "DBMS_UTILITY")
+            util_ok = ok
+            perm["dbms_utility_grant"] = msg
+            if util_ok:
+                util_ok = _check_priv(util_sql)
+        perm["dbms_utility_ok"] = util_ok
+
+        # 1-3. DBMS_SHARED_POOL
+        _progress(1, 6, "target_permission_check(DBMS_SHARED_POOL)", "running")
+        shared_pool_sql = (
+            "SELECT 'USER_TAB_PRIVS' AS source, privilege AS dbms_shared_pool_privilege "
+            "FROM user_tab_privs WHERE table_name = 'DBMS_SHARED_POOL' AND privilege = 'EXECUTE' "
+            "UNION ALL "
+            "SELECT 'DBA_TAB_PRIVS' AS source, privilege AS dbms_shared_pool_privilege "
+            "FROM dba_tab_privs WHERE grantee = 'PUBLIC' AND table_name = 'DBMS_SHARED_POOL' AND privilege = 'EXECUTE' "
+            "UNION ALL "
+            "SELECT 'USER_SYS_PRIVS' AS source, privilege AS dbms_shared_pool_privilege "
+            "FROM user_sys_privs WHERE privilege = 'EXECUTE ANY PROCEDURE'"
+        )
+        pool_ok = _check_priv(shared_pool_sql)
+        if not pool_ok:
+            ok, msg = _ssh_grant(f"GRANT EXECUTE ON SYS.DBMS_SHARED_POOL TO {target_user};", "DBMS_SHARED_POOL")
+            pool_ok = ok
+            perm["dbms_shared_pool_grant"] = msg
+            if pool_ok:
+                pool_ok = _check_priv(shared_pool_sql)
+        perm["dbms_shared_pool_ok"] = pool_ok
+
+        result_data["permission_checks"] = perm
+
+        # 필수 권한(ALTER SYSTEM, DBMS_UTILITY) 최종 확인
+        missing = []
+        if not perm.get("alter_system_ok"):
+            missing.append("ALTER SYSTEM")
+        if not perm.get("dbms_utility_ok"):
+            missing.append("DBMS_UTILITY EXECUTE")
+        if missing:
             _progress(1, 6, "target_permission_check", "fail")
             return {
                 "overall_status": "fail",
-                "error": "필수 권한(ALTER SYSTEM / DBMS_LOCK / DBMS_UTILITY) 부족",
+                "error": f"필수 권한 부족: {', '.join(missing)}",
                 "data": result_data,
             }
         _progress(1, 6, "target_permission_check", "pass")
@@ -848,45 +910,47 @@ def run_new_repo_check(
             except Exception:
                 pass
 
-    # Step 6: SYS 정리
+    # Step 6: 정리 (target 계정으로 실행, SYS 불필요)
     clean_msg = "Cleanup attempted."
-    if sys_password:
-        try:
-            dsn = oracledb.makedsn(target_cfg["host"], target_cfg["port"], sid=target_cfg["sid"])
-            sys_conn = oracledb.connect(user="sys", password=sys_password, dsn=dsn, mode=oracledb.SYSDBA)
-            scur = sys_conn.cursor()
-            step6_sql = _read_sql_template("step6.txt")
-            blocks = _split_oracle_blocks(step6_sql)
-            if blocks:
-                for b in blocks:
-                    exec_sql = b.replace("testuser_name := 'maxgauge';", f"testuser_name := '{target_user}';")
-                    exec_sql = exec_sql.replace("test_db_user varchar2(20) := 'maxgauge';", f"test_db_user varchar2(20) := '{target_user}';")
-                    if exec_sql.strip().endswith(";"):
-                        exec_sql = exec_sql.strip()[:-1]
+    try:
+        dsn = oracledb.makedsn(target_config["host"], target_config["port"], sid=target_config["sid"])
+        clean_conn = oracledb.connect(user=target_user, password=target_password, dsn=dsn)
+        scur = clean_conn.cursor()
+        step6_sql = _read_sql_template("step6.txt")
+        blocks = _split_oracle_blocks(step6_sql)
+        block_results = []
+        if blocks:
+            for b in blocks:
+                exec_sql = b.replace("testuser_name := 'maxgauge';", f"testuser_name := '{target_user}';")
+                exec_sql = exec_sql.replace("test_db_user varchar2(20) := 'maxgauge';", f"test_db_user varchar2(20) := '{target_user}';")
+                if exec_sql.strip().endswith(";"):
+                    exec_sql = exec_sql.strip()[:-1]
+                try:
                     scur.execute(exec_sql)
-            else:
-                scur.execute(f"""
-                    DECLARE
-                        testuser_name varchar2(64) := '{target_user}';
-                    BEGIN
-                        EXECUTE IMMEDIATE 'DROP PROCEDURE ' || testuser_name || '.qs_sql_test_proc1';
-                        EXECUTE IMMEDIATE 'DROP PROCEDURE ' || testuser_name || '.qs_sql_test_proc2';
-                        EXECUTE IMMEDIATE 'DROP PROCEDURE ' || testuser_name || '.qs_sql_test_proc3';
-                        EXECUTE IMMEDIATE 'DROP PROCEDURE ' || testuser_name || '.qs_sql_test_proc4';
-                        EXECUTE IMMEDIATE 'DROP PROCEDURE ' || testuser_name || '.qs_sql_test_proc5';
-                    END;
-                """)
-            sys_conn.commit()
-            scur.close()
-            sys_conn.close()
-            clean_msg = "SYS shared pool purge + drop procedures success"
-            _progress(6, 6, "target_cleanup_sys", "pass")
-        except Exception as e:
-            clean_msg = f"SYS cleanup failed: {e}"
-            _progress(6, 6, "target_cleanup_sys", "fail")
-    else:
-        clean_msg = "SYS password not provided; cleanup skipped"
-        _progress(6, 6, "target_cleanup_sys", "skip")
+                    block_results.append("ok")
+                except Exception as be:
+                    block_results.append(f"skip({be})")
+        else:
+            scur.execute(f"""
+                DECLARE
+                    testuser_name varchar2(64) := '{target_user}';
+                BEGIN
+                    EXECUTE IMMEDIATE 'DROP PROCEDURE ' || testuser_name || '.qs_sql_test_proc1';
+                    EXECUTE IMMEDIATE 'DROP PROCEDURE ' || testuser_name || '.qs_sql_test_proc2';
+                    EXECUTE IMMEDIATE 'DROP PROCEDURE ' || testuser_name || '.qs_sql_test_proc3';
+                    EXECUTE IMMEDIATE 'DROP PROCEDURE ' || testuser_name || '.qs_sql_test_proc4';
+                    EXECUTE IMMEDIATE 'DROP PROCEDURE ' || testuser_name || '.qs_sql_test_proc5';
+                END;
+            """)
+            block_results.append("ok")
+        clean_conn.commit()
+        scur.close()
+        clean_conn.close()
+        clean_msg = "cleanup success: " + ", ".join(block_results)
+        _progress(6, 6, "target_cleanup", "pass")
+    except Exception as e:
+        clean_msg = f"cleanup failed: {e}"
+        _progress(6, 6, "target_cleanup", "fail")
 
     result_data["cleanup_info"] = clean_msg
 

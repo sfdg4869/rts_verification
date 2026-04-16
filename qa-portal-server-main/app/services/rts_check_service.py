@@ -107,6 +107,56 @@ def _shell_quote(s: str) -> str:
 
 
 # ────────────────────────────────────────────────────────
+# OS 감지 및 OS별 명령어 헬퍼
+# ────────────────────────────────────────────────────────
+
+def _detect_os(ssh: "_SSHSession") -> str:
+    """SSH로 접속한 서버의 OS 타입을 감지한다.
+
+    Returns:
+        'linux' | 'aix' | 'hpux' | 'sunos' | 'unknown'
+    """
+    try:
+        out, _, _ = ssh.run("uname -s 2>/dev/null", timeout=5)
+        s = out.strip().lower()
+        if "linux" in s:
+            return "linux"
+        if "aix" in s:
+            return "aix"
+        if "hp-ux" in s:
+            return "hpux"
+        if "sunos" in s or "solaris" in s:
+            return "sunos"
+    except Exception:
+        pass
+    return "unknown"
+
+
+def _os_ps_cmd(os_type: str) -> str:
+    """실행 중인 MaxGauge/rts 프로세스를 찾는 OS별 ps 명령어."""
+    if os_type in ("hpux", "sunos"):
+        return "ps -ef 2>/dev/null | egrep 'rts|rtsmon|maxgauge|mxg' | head -15"
+    elif os_type == "aix":
+        # ps aux on AIX는 COMMAND 컬럼을 터미널 너비로 잘라 절대경로가 잘림.
+        # ps -ef 는 전체 args를 포함한 전체 경로를 보여줌.
+        return "ps -ef 2>/dev/null | grep -E 'rts|rtsmon|maxgauge|mxg' | grep -v grep | head -15"
+    else:
+        return "ps aux 2>/dev/null | grep -E 'rts|rtsmon|maxgauge|mxg' | grep -v grep | head -15"
+
+
+def _find_in_root(root: str, name: str, os_type: str, depth: int = 8) -> str:
+    """단일 루트 디렉터리 안에서 name 파일/디렉터리 탐색 명령어.
+    HP-UX / SunOS는 -maxdepth 미지원 → 없이 탐색 (루트 자체가 좁으므로 충분히 빠름).
+    """
+    rq = _shell_quote(root)
+    nq = _shell_quote(name)
+    if os_type in ("linux", "aix", "unknown"):
+        return f"test -d {rq} && find {rq} -maxdepth {depth} -name {nq} 2>/dev/null | head -5"
+    else:
+        return f"test -d {rq} && find {rq} -name {nq} 2>/dev/null | head -5"
+
+
+# ────────────────────────────────────────────────────────
 # 개별 점검 스텝
 # ────────────────────────────────────────────────────────
 
@@ -428,7 +478,7 @@ def _step_resource_usage(ssh: _SSHSession, pid_map: Dict[str, Optional[str]]) ->
 
 
 def _step_abnormal_signals(ssh: _SSHSession, conf_dir: str) -> Dict[str, Any]:
-    """Step 6: {conf_dir}/log/maxgauge/ 에서 SIGBUS, SIGSEGV 등 비정상 종료 징후 검색"""
+    """Step 5: {conf_dir}/log/maxgauge/ 에서 SIGBUS, SIGSEGV 등 비정상 종료 징후 검색"""
     t0 = time.time()
     log_dir = _log_root(conf_dir)
     keyword_pattern = "|".join(_ABNORMAL_KEYWORDS)
@@ -580,13 +630,21 @@ def _step_target_vsql_query(db_row: Dict[str, Any], host_override: Optional[str]
 # ────────────────────────────────────────────────────────
 
 def _resolve_conf_dir(
-    ssh: _SSHSession, conf_name: str, user_base_dir: Optional[str]
-) -> Optional[str]:
+    ssh: "_SSHSession", conf_name: str, user_base_dir: Optional[str],
+    os_type: str = "unknown",
+) -> Tuple[Optional[str], str]:
     """
-    conf_name 에 해당하는 MaxGauge conf 디렉터리(= .mxgrc 가 있는 곳)를 찾아 반환.
-    경로 어딘가에 conf_name 이 포함된 디렉터리를 탐색하며, .mxgrc 존재를 우선 기준으로 삼는다.
-    찾지 못하면 None 반환.
+    SSH로 접속한 서버에서 conf_name(= instance_name)에 해당하는
+    MaxGauge conf 디렉터리(= .mxgrc 가 있는 곳)를 찾아 반환한다.
+
+    Returns:
+        (conf_dir_path, diag_msg) — 찾으면 경로, 못 찾으면 None + 진단 메시지
+
+    모든 Unix(Linux / AIX / HP-UX / SunOS) 호환:
+      - find -maxdepth : Linux/AIX만 사용. HP-UX/SunOS는 shell glob 순회.
+      - POSIX test / grep / ls 만 사용.
     """
+    diag: List[str] = []
     conf_q = _shell_quote(conf_name)
 
     def _safe_run(cmd: str, timeout: int = CMD_TIMEOUT) -> Tuple[str, str, int]:
@@ -597,91 +655,307 @@ def _resolve_conf_dir(
         except Exception:
             return "", "error", 1
 
+    def _dir_exists(d: str) -> bool:
+        out, _, _ = _safe_run(f"test -d {_shell_quote(d)} && echo Y || echo N", timeout=3)
+        return out.strip() == "Y"
+
     def _has_mxgrc(d: str) -> bool:
-        cq = _shell_quote(d)
-        out, _, _ = _safe_run(f"test -f {cq}/.mxgrc && echo OK || echo NG", timeout=3)
-        return out.strip() == "OK"
+        out, _, _ = _safe_run(f"test -f {_shell_quote(d)}/.mxgrc && echo Y || echo N", timeout=3)
+        return out.strip() == "Y"
 
-    # 고정 후보 + 서버의 실제 최상위 디렉토리를 동적으로 합쳐서 탐색 루트를 구성한다.
-    # /proc, /sys, /dev 등 가상 파일시스템은 제외한다.
-    SKIP_ROOTS = {"/proc", "/sys", "/dev", "/run", "/tmp", "/lost+found"}
-    fixed_roots = ["/data1", "/data2", "/data", "/mxg", "/maxgauge",
-                   "/u01", "/u02", "/app", "/home", "/opt", "/usr/local", "/export"]
+    def _content_matches(mxgrc_path: str) -> bool:
+        """파일 내용에 conf_name 포함 여부 (대소문자 무시)."""
+        out, _, _ = _safe_run(
+            f"grep {conf_q} {_shell_quote(mxgrc_path)} 2>/dev/null | head -1",
+            timeout=3,
+        )
+        if out.strip():
+            return True
+        # grep -i 가 없는 구형 OS 대비 — 대문자 변환해서 재시도
+        upper = conf_name.upper()
+        out2, _, _ = _safe_run(
+            f"grep {_shell_quote(upper)} {_shell_quote(mxgrc_path)} 2>/dev/null | head -1",
+            timeout=3,
+        )
+        return bool(out2.strip())
 
-    # 서버 최상위 디렉토리 목록 가져오기
-    top_out, _, _ = _safe_run(
-        "ls -1d /*/  2>/dev/null | sed 's|/$||'",
-        timeout=5,
-    )
-    dynamic_roots = [
-        p.strip() for p in top_out.splitlines()
-        if p.strip() and p.strip() not in SKIP_ROOTS
-    ]
-    # 고정 후보를 앞에 두고 동적 목록으로 보완 (중복 제거, 순서 유지)
-    seen: set = set()
-    search_roots = []
-    for r in fixed_roots + dynamic_roots:
-        if r and r not in seen:
-            seen.add(r)
-            search_roots.append(r)
+    def _check_dir(d: str) -> bool:
+        """d 디렉터리가 .mxgrc를 갖고, 경로나 내용에 conf_name이 있으면 True."""
+        if not _has_mxgrc(d):
+            return False
+        if conf_name.lower() in d.lower():
+            return True
+        return _content_matches(f"{d}/.mxgrc")
 
-    all_roots_str = " ".join(_shell_quote(r) for r in search_roots)
+    conf_name_upper = conf_name.upper()
+    conf_name_upper_q = _shell_quote(conf_name_upper)
 
-    # 1) 사용자가 base_dir 또는 conf_dir를 직접 준 경우
+    def _find_matching_conf_dir_in(root: str) -> Optional[str]:
+        """root 아래에서 conf_name에 매칭되는 conf_dir을 단일 SSH 호출로 반환.
+        경로 또는 .mxgrc 내용에 conf_name이 있으면 매칭.
+        HP-UX/SunOS: shell glob 순회, Linux/AIX: find (-follow for AIX).
+        """
+        rq = _shell_quote(root)
+        grep_content = (
+            f"grep {conf_q} \"$_d/.mxgrc\" > /dev/null 2>&1 "
+            f"|| grep {conf_name_upper_q} \"$_d/.mxgrc\" > /dev/null 2>&1"
+        )
+        grep_path = f"echo \"$_d\" | grep {conf_q} > /dev/null 2>&1"
+
+        if os_type == "aix":
+            # AIX: -follow 로 심볼릭 링크 디렉터리도 탐색
+            cmd = (
+                f"find {rq} -follow -maxdepth 8 -name '.mxgrc' 2>/dev/null | while read _f; do "
+                f"  _d=$(dirname \"$_f\"); "
+                f"  ( {grep_path} || {grep_content} ) && echo \"$_d\" && break; "
+                f"done 2>/dev/null | head -1"
+            )
+        elif os_type in ("linux", "unknown"):
+            cmd = (
+                f"find {rq} -maxdepth 8 -name '.mxgrc' 2>/dev/null | while read _f; do "
+                f"  _d=$(dirname \"$_f\"); "
+                f"  ( {grep_path} || {grep_content} ) && echo \"$_d\" && break; "
+                f"done 2>/dev/null | head -1"
+            )
+        else:
+            # HP-UX / SunOS: shell glob 3단계 순회
+            cmd = (
+                f"for _d in {rq} {rq}/* {rq}/*/* {rq}/*/*/*; do "
+                f"  if test -f \"$_d/.mxgrc\"; then "
+                f"    ( {grep_path} || {grep_content} ) && echo \"$_d\" && break; "
+                f"  fi; "
+                f"done 2>/dev/null | head -1"
+            )
+        out, _, _ = _safe_run(cmd, timeout=25)
+        lines = [l.strip() for l in out.strip().splitlines() if l.strip()]
+        return lines[0] if lines else None
+
+    def _find_mxgrc_in(root: str) -> List[str]:
+        """root 아래 .mxgrc 파일 목록 반환 — 진단용 (step6 fallback)."""
+        rq = _shell_quote(root)
+        if os_type == "aix":
+            cmd = f"find {rq} -follow -maxdepth 8 -name '.mxgrc' 2>/dev/null | head -50"
+        elif os_type in ("linux", "unknown"):
+            cmd = f"find {rq} -maxdepth 8 -name '.mxgrc' 2>/dev/null | head -50"
+        else:
+            cmd = (
+                f"for _d in {rq} {rq}/* {rq}/*/* {rq}/*/*/*; do "
+                f"test -f \"$_d/.mxgrc\" && echo \"$_d/.mxgrc\"; "
+                f"done 2>/dev/null | head -50"
+            )
+        out, _, _ = _safe_run(cmd, timeout=25)
+        return [l.strip() for l in out.strip().splitlines() if l.strip().endswith("/.mxgrc")]
+
+    def _find_rtsctl_in(root: str) -> List[str]:
+        """root 아래 rtsctl 바이너리 목록 반환."""
+        rq = _shell_quote(root)
+        if os_type == "aix":
+            cmd = f"find {rq} -follow -maxdepth 8 -name 'rtsctl' -type f 2>/dev/null | head -5"
+        elif os_type in ("linux", "unknown"):
+            cmd = f"find {rq} -maxdepth 8 -name 'rtsctl' -type f 2>/dev/null | head -5"
+        else:
+            # HP-UX / SunOS: shell glob 순회로 대체
+            cmd = (
+                f"for _f in {rq}/rtsctl {rq}/*/rtsctl {rq}/bin/rtsctl "
+                f"{rq}/*/bin/rtsctl {rq}/*/*/rtsctl {rq}/*/*/bin/rtsctl; do "
+                f"test -f \"$_f\" && echo \"$_f\"; "
+                f"done 2>/dev/null | head -5"
+            )
+        out, _, _ = _safe_run(cmd, timeout=15)
+        return [l.strip() for l in out.strip().splitlines() if l.strip()]
+
+    def _rtsctl_to_dir(path: str) -> Optional[str]:
+        """rtsctl 경로 → conf_dir. .mxgrc + conf_name 매칭 시 반환."""
+        d = path.rsplit("/", 1)[0]
+        if d.endswith("/bin"):
+            d = d[:-4]
+        return d if _check_dir(d) else None
+
+    # ── 1) 사용자가 base_dir 직접 입력 ─────────────────────────────────
     if user_base_dir:
         base = user_base_dir.rstrip("/")
-        candidate = f"{base}/{conf_name}"
-        if _has_mxgrc(candidate):
-            return candidate
-        if _has_mxgrc(base):
-            return base
-        out, _, _ = _safe_run(f"test -d {_shell_quote(candidate)} && echo OK || echo NG", timeout=3)
-        return candidate if out.strip() == "OK" else base
+        for cand in [f"{base}/{conf_name}", base]:
+            if _has_mxgrc(cand):
+                return cand, f"user_base_dir={base} → {cand}"
+        return base, f"user_base_dir={base} (no .mxgrc found, returning as-is)"
 
-    # 2) find로 .mxgrc 직접 탐색 — 경로에 conf_name 포함된 것
-    out_find, _, _ = _safe_run(
-        f"for R in {all_roots_str}; do"
-        f"  [ -d \"$R\" ] || continue;"
-        f"  find \"$R\" -maxdepth 10 -name '.mxgrc' 2>/dev/null | grep -F {conf_q};"
-        f"done | head -5",
-        timeout=30,
+    # ── 2) 서버의 최상위 디렉터리를 동적으로 수집 ────────────────────────
+    # ls / 는 모든 Unix에서 동작. 가상 FS 및 시스템 디렉터리는 제외.
+    SKIP = {
+        "proc", "sys", "dev", "run", "tmp", "lost+found",
+        "etc", "bin", "sbin", "lib", "lib64", "lib32",
+        "boot", "var", "cdrom", "media", "mnt", "srv",
+    }
+    ls_out, _, _ = _safe_run("ls / 2>/dev/null", timeout=5)
+    dyn_roots = [
+        f"/{d.strip()}" for d in ls_out.splitlines()
+        if d.strip() and d.strip() not in SKIP
+    ]
+    diag.append(f"ls /: {dyn_roots}")
+    # 고정 후보를 앞에 두고 동적 목록으로 보완
+    fixed = [
+        "/data1", "/data2", "/data3", "/data",
+        "/mxg", "/maxgauge",
+        "/u01", "/u02", "/u03",
+        "/app", "/apps", "/application",
+        "/opt", "/opt/maxgauge",
+        "/usr/local",
+        "/home", "/export", "/product", "/software",
+    ]
+    seen: set = set()
+    roots: List[str] = []
+    for r in fixed + dyn_roots:
+        if r and r not in seen:
+            seen.add(r)
+            roots.append(r)
+
+    # AIX는 /data1/home/maxgauge 같은 2단계 경로에 설치되는 경우가 있어
+    # 주요 data 루트의 home / maxgauge 서브디렉터리를 roots에 추가
+    if os_type == "aix":
+        aix_extra = []
+        for r in ["/data1", "/data2", "/data3", "/u", "/export", "/home"]:
+            for sub in ["home", "home/maxgauge", "home/mxg"]:
+                cand = f"{r}/{sub}"
+                if cand not in seen:
+                    seen.add(cand)
+                    aix_extra.append(cand)
+        roots = aix_extra + roots  # 앞에 두어 먼저 탐색
+
+    # ── 2.5) maxgauge 유저 홈 디렉터리 → roots 앞에 추가 ────────────────
+    out_home, _, _ = _safe_run(
+        "grep '^maxgauge:' /etc/passwd 2>/dev/null | cut -d: -f6 | head -1",
+        timeout=3,
     )
-    for line in out_find.strip().splitlines():
-        line = line.strip()
-        if line and conf_name in line and line.endswith("/.mxgrc"):
-            return line[: -len("/.mxgrc")]
+    user_home = out_home.strip() if out_home.strip().startswith("/") else None
+    diag.append(f"maxgauge user home: {user_home!r}")
+    if user_home:
+        for h in [user_home, user_home.rsplit("/", 1)[0]]:
+            if h and h != "/" and h not in seen:
+                seen.add(h)
+                roots.insert(0, h)
 
-    # 3) rtsctl 바이너리 위치로 conf_dir 역추적
-    out_rtsc, _, _ = _safe_run(
-        f"for R in {all_roots_str}; do"
-        f"  [ -d \"$R\" ] || continue;"
-        f"  find \"$R\" -maxdepth 10 -name 'rtsctl' -type f 2>/dev/null | grep -F {conf_q};"
-        f"done | head -3",
-        timeout=25,
+    diag.append(f"roots to search: {roots}")
+
+    # ── 3) which rtsctl (PATH에 등록된 경우 즉시 해결) ──────────────────
+    out_wh, _, _ = _safe_run(
+        "which rtsctl 2>/dev/null || type rtsctl 2>/dev/null | head -1",
+        timeout=5,
     )
-    for line in out_rtsc.strip().splitlines():
-        line = line.strip()
-        if line and conf_name in line:
-            d = line.rsplit("/", 1)[0]
-            if d.endswith("/bin"):
-                d = d[:-4]
-            if _has_mxgrc(d):
-                return d
+    diag.append(f"which rtsctl: {out_wh.strip()!r}")
+    for wl in out_wh.strip().splitlines():
+        wl = wl.strip()
+        if "/" in wl:
+            d = _rtsctl_to_dir(wl.split()[-1])
+            if d:
+                return d, f"which rtsctl → {d}"
 
-    # 4) .mxgrc 없어도 conf_name과 정확히 일치하는 디렉토리 반환 (최후 수단)
-    out_dir, _, _ = _safe_run(
-        f"for R in {all_roots_str}; do"
-        f"  [ -d \"$R\" ] || continue;"
-        f"  find \"$R\" -maxdepth 10 -type d -name {conf_q} 2>/dev/null;"
-        f"done | head -5",
-        timeout=25,
+    # ── 3.5) /proc/{pid}/cwd 로 실행 중 프로세스의 작업 디렉터리 확인 ──────
+    # AIX/SunOS: ps에 절대경로가 없을 때 /proc/{pid}/cwd symlink가 conf_dir을 가리킴
+    proc_cwd_cmd = (
+        f"_pid=$(ps -ef 2>/dev/null | grep {conf_q} | grep -v grep | awk 'NR==1{{print $2}}'); "
+        f"[ -n \"$_pid\" ] && ("
+        f"  readlink /proc/$_pid/cwd 2>/dev/null || "
+        f"  ls -la /proc/$_pid/cwd 2>/dev/null | awk '{{print $NF}}' | grep '^/' | head -1"
+        f") | head -1"
     )
-    for line in out_dir.strip().splitlines():
-        line = line.strip()
-        if line:
-            return line
+    out_cwd, _, _ = _safe_run(proc_cwd_cmd, timeout=5)
+    cwd_path = out_cwd.strip()
+    diag.append(f"/proc/pid/cwd: {cwd_path!r}")
+    if cwd_path.startswith("/"):
+        for cand in [cwd_path, f"{cwd_path}/{conf_name}"]:
+            if _check_dir(cand):
+                return cand, f"/proc/pid/cwd → {cand}"
+        # cwd가 bin 디렉터리인 경우 parent 확인
+        for cand in [cwd_path.rstrip("/"), cwd_path.rsplit("/", 1)[0]]:
+            if cand and _check_dir(cand):
+                return cand, f"/proc/pid/cwd parent → {cand}"
+        # cwd를 roots 앞에 추가해 step5/6에서도 탐색
+        for p in [cwd_path, cwd_path.rsplit("/", 1)[0]]:
+            if p and p != "/" and p not in seen:
+                seen.add(p)
+                roots.insert(0, p)
 
-    return None
+    # ── 4) ps로 실행 중 프로세스에서 경로 추출 ──────────────────────────
+    ps_cmd = _os_ps_cmd(os_type)
+    out_ps, _, _ = _safe_run(ps_cmd, timeout=8)
+    diag.append(f"ps result: {out_ps.strip()[:400]!r}")
+    for ps_line in out_ps.strip().splitlines():
+        for part in ps_line.split():
+            if "/" not in part:
+                continue
+            if conf_name.lower() in part.lower():
+                d = part.rsplit("/", 1)[0]
+                if d.endswith("/bin"):
+                    d = d[:-4]
+                if _has_mxgrc(d):
+                    return d, f"ps path match → {d}"
+            if any(x in part for x in ("rtsctl", "rtsmon")):
+                d = _rtsctl_to_dir(part)
+                if d:
+                    return d, f"ps rtsctl path → {d}"
+
+    # ── 5) 각 루트 아래 {conf_name} 서브디렉터리 직접 확인 (가장 빠름) ──
+    # test -f 로만 확인 → SSH 1 round-trip per path, OS 무관.
+    # 단일 인스턴스 설치의 경우 conf_name 이름 없이 maxgauge 디렉터리 자체가 conf_dir.
+    checked5: List[str] = []
+    for root in roots:
+        if not _dir_exists(root):
+            continue
+        for cand in [
+            f"{root}/{conf_name}",
+            f"{root}/maxgauge/{conf_name}",
+            f"{root}/mxg/{conf_name}",
+            # AIX 패턴: /data1/home/maxgauge/{conf_name} 또는 /data1/home/{conf_name}
+            f"{root}/home/maxgauge/{conf_name}",
+            f"{root}/home/{conf_name}",
+            f"{root}/home/mxg/{conf_name}",
+            # 단일 인스턴스: MaxGauge 루트 자체가 conf_dir (경로에 instance명 없을 수 있음)
+            f"{root}/home/maxgauge",
+            f"{root}/home/mxg",
+            f"{root}/maxgauge",
+            f"{root}/mxg",
+            f"{root}/maxg",
+            f"{root}/MXG",
+            f"{root}/MAXGAUGE",
+        ]:
+            checked5.append(cand)
+            if _check_dir(cand):
+                return cand, f"step5 direct check → {cand}"
+    diag.append(f"step5 checked {len(checked5)} paths, none matched")
+
+    # ── 6) 각 루트 아래 .mxgrc 탐색 + conf_name 매칭 (단일 SSH 호출) ──────
+    for root in roots:
+        if not _dir_exists(root):
+            continue
+        d = _find_matching_conf_dir_in(root)
+        if d:
+            return d, f"step6 .mxgrc match → {d}"
+    # 디버그: 매칭 실패 시 실제로 어떤 .mxgrc가 있는지 확인
+    # user_home, cwd_path, 그리고 ls /에서 찾은 실제 존재하는 root 샘플링
+    found6: List[str] = []
+    sample_roots = []
+    if user_home:
+        sample_roots.append(user_home)
+    if cwd_path.startswith("/"):
+        sample_roots.append(cwd_path.rsplit("/", 1)[0])
+    sample_roots += [r for r in dyn_roots if _dir_exists(r)][:5]
+    for root in sample_roots:
+        found6.extend(_find_mxgrc_in(root))
+    diag.append(f"step6 no match. sample .mxgrc files (from {sample_roots}): {found6[:20]}")
+
+    # ── 7) 각 루트 아래 rtsctl 위치로 역추적 ───────────────────────────
+    found7: List[str] = []
+    for root in roots:
+        if not _dir_exists(root):
+            continue
+        for rpath in _find_rtsctl_in(root):
+            found7.append(rpath)
+            d = _rtsctl_to_dir(rpath)
+            if d:
+                return d, f"step7 rtsctl → {d}"
+    diag.append(f"step7 rtsctl files found: {found7}")
+
+    return None, "\n".join(diag)
 
 
 def get_apm_db_row(db_id: int) -> Tuple[bool, Optional[Dict[str, Any]], str]:
@@ -791,11 +1065,19 @@ def run_rts_check(
         return result
 
     try:
-        resolved_conf_dir = _resolve_conf_dir(ssh, resolved_conf, base_dir)
+        # OS 타입 감지 (uname -s) — 이후 find/ps 명령어 분기에 사용
+        detected_os = _detect_os(ssh)
+        result["os_type"] = detected_os
+
+        resolved_conf_dir, path_diag = _resolve_conf_dir(
+            ssh, resolved_conf, base_dir, os_type=detected_os
+        )
         if resolved_conf_dir is None:
             result["overall_status"] = "error"
             result["error"] = (
-                f"MaxGauge 설치 경로를 찾을 수 없습니다 (conf: {resolved_conf}). "
+                f"MaxGauge 설치 경로를 찾을 수 없습니다 "
+                f"(conf: {resolved_conf}, os: {detected_os}).\n"
+                f"진단 정보:\n{path_diag}\n"
                 "서버에 직접 접속해 경로를 확인 후 'Base Dir' 필드에 입력해주세요."
             )
             result["total_duration_ms"] = _elapsed_ms(total_t0)

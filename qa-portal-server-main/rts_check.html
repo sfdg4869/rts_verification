@@ -453,10 +453,8 @@ input::placeholder { color: var(--theme-text-muted); }
       <span class="step-label">2. rtsctl stat</span>
       <span class="step-label">3. PID 교차검증</span>
       <span class="step-label">4. ERROR grep</span>
-      <span class="step-label">5. CPU/MEM</span>
-      <span class="step-label">6. 비정상 종료 시그널</span>
-      <span class="step-label">7. Target 조회(v$sql)</span>
-      <span class="step-label" id="stepLabelStopVerify" style="display:none;color:var(--warn)">8. rtsctl stop 검증</span>
+      <span class="step-label">5. 비정상 종료 시그널</span>
+      <span class="step-label" id="stepLabelStopVerify" style="display:none;color:var(--warn)">6. rtsctl stop 검증</span>
     </div>
     <div class="status-msg" style="color:var(--text2);margin:8px 0 6px">Repo 점검 항목 (SQL)</div>
     <div class="step-labels">
@@ -1834,8 +1832,7 @@ const STEP_NAMES = {
   target_check_dbms_utility_priv: 'Target 2. DBMS_UTILITY 권한 확인',
   target_create_minitest_proc: 'Target 3. QS_SQL_MINITEST_PROC 생성',
   target_run_minitest_block: 'Target 4. 미니테스트 블록 실행',
-  target_query_result_step7: '7. Target 조회(v$sql 결과)',
-  rtsctl_stop_verify: '8. rtsctl stop 검증',
+  rtsctl_stop_verify: '6. rtsctl stop 검증',
 };
 
 function badge(status) {

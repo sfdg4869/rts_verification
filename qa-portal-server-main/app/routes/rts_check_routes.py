@@ -904,6 +904,9 @@ def run_repo_new_job_api():
                 pol_repo_config_id=pol_repo_config_id,
                 pol_repo_schema_name=pol_repo_schema_name,
                 pol_repo_db_id_list=pol_repo_db_id_list,
+                ssh_user=ssh_user,
+                ssh_password=ssh_password,
+                ssh_port=ssh_port,
             )
             with _REPO_JOB_LOCK:
                 job = _REPO_JOBS.get(job_id)
