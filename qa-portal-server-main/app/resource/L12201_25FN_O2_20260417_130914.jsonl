@@ -1,0 +1,8 @@
+{"logged_at": "2026-04-17 13:10:05", "host_ip": "10.10.47.64", "conf_name": "L12201_25FN_O2", "daemon": "rts", "pid": "25252", "cpu_pct": 1.1, "mem_pct": 0.5, "real_mem_mb": 90.305, "virtual_mem_mb": 3298.039}
+{"logged_at": "2026-04-17 13:10:05", "host_ip": "10.10.47.64", "conf_name": "L12201_25FN_O2", "daemon": "sndf", "pid": "25278", "cpu_pct": 0.1, "mem_pct": 0.0, "real_mem_mb": 0.746, "virtual_mem_mb": 144.387}
+{"logged_at": "2026-04-17 13:10:05", "host_ip": "10.10.47.64", "conf_name": "L12201_25FN_O2", "daemon": "obsd", "pid": "25306", "cpu_pct": 0.0, "mem_pct": 0.0, "real_mem_mb": 0.859, "virtual_mem_mb": 14.094}
+{"logged_at": "2026-04-17 13:10:05", "host_ip": "10.10.47.64", "conf_name": "L12201_25FN_O2", "daemon": "updater", "pid": "25343", "cpu_pct": 0.0, "mem_pct": 0.0, "real_mem_mb": 1.262, "virtual_mem_mb": 79.402}
+{"logged_at": "2026-04-17 13:11:50", "host_ip": "10.10.47.64", "conf_name": "L12201_25FN_O2", "daemon": "rts", "pid": "25252", "cpu_pct": 1.1, "mem_pct": 0.5, "real_mem_mb": 90.316, "virtual_mem_mb": 3298.043}
+{"logged_at": "2026-04-17 13:11:50", "host_ip": "10.10.47.64", "conf_name": "L12201_25FN_O2", "daemon": "sndf", "pid": "25278", "cpu_pct": 0.1, "mem_pct": 0.0, "real_mem_mb": 0.746, "virtual_mem_mb": 144.387}
+{"logged_at": "2026-04-17 13:11:50", "host_ip": "10.10.47.64", "conf_name": "L12201_25FN_O2", "daemon": "obsd", "pid": "25306", "cpu_pct": 0.0, "mem_pct": 0.0, "real_mem_mb": 0.859, "virtual_mem_mb": 14.094}
+{"logged_at": "2026-04-17 13:11:50", "host_ip": "10.10.47.64", "conf_name": "L12201_25FN_O2", "daemon": "updater", "pid": "25343", "cpu_pct": 0.0, "mem_pct": 0.0, "real_mem_mb": 1.262, "virtual_mem_mb": 79.402}

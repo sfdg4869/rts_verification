@@ -916,38 +916,48 @@ def run_new_repo_check(
         dsn = oracledb.makedsn(target_config["host"], target_config["port"], sid=target_config["sid"])
         clean_conn = oracledb.connect(user=target_user, password=target_password, dsn=dsn)
         scur = clean_conn.cursor()
+        block_results = []
+
+        # Step 6-1: DBMS_SHARED_POOL purge (첫 번째 블록만 — 권한 없으면 skip)
         step6_sql = _read_sql_template("step6.txt")
         blocks = _split_oracle_blocks(step6_sql)
-        block_results = []
         if blocks:
-            for b in blocks:
-                exec_sql = b.replace("testuser_name := 'maxgauge';", f"testuser_name := '{target_user}';")
-                exec_sql = exec_sql.replace("test_db_user varchar2(20) := 'maxgauge';", f"test_db_user varchar2(20) := '{target_user}';")
-                if exec_sql.strip().endswith(";"):
-                    exec_sql = exec_sql.strip()[:-1]
-                try:
-                    scur.execute(exec_sql)
-                    block_results.append("ok")
-                except Exception as be:
-                    block_results.append(f"skip({be})")
-        else:
-            scur.execute(f"""
-                DECLARE
-                    testuser_name varchar2(64) := '{target_user}';
-                BEGIN
-                    EXECUTE IMMEDIATE 'DROP PROCEDURE ' || testuser_name || '.qs_sql_test_proc1';
-                    EXECUTE IMMEDIATE 'DROP PROCEDURE ' || testuser_name || '.qs_sql_test_proc2';
-                    EXECUTE IMMEDIATE 'DROP PROCEDURE ' || testuser_name || '.qs_sql_test_proc3';
-                    EXECUTE IMMEDIATE 'DROP PROCEDURE ' || testuser_name || '.qs_sql_test_proc4';
-                    EXECUTE IMMEDIATE 'DROP PROCEDURE ' || testuser_name || '.qs_sql_test_proc5';
-                END;
-            """)
-            block_results.append("ok")
+            b = blocks[0]
+            exec_sql = b.replace("testuser_name := 'maxgauge';", f"testuser_name := '{target_user}';")
+            if exec_sql.strip().endswith(";"):
+                exec_sql = exec_sql.strip()[:-1]
+            try:
+                scur.execute(exec_sql)
+                block_results.append("shared_pool_purge:ok")
+            except Exception as be:
+                block_results.append(f"shared_pool_purge:skip({be})")
+
+        # Step 6-2: 프로시저 개별 DROP — 하나씩 실행해 이전 실패/누락 여부와 무관하게 전부 삭제
+        _TEST_PROCS = (
+            "qs_sql_test_proc1", "qs_sql_test_proc2", "qs_sql_test_proc3",
+            "qs_sql_test_proc4", "qs_sql_test_proc5",
+        )
+        dropped: List[str] = []
+        drop_failed: List[str] = []
+        for proc in _TEST_PROCS:
+            try:
+                scur.execute(f"DROP PROCEDURE {target_user}.{proc}")
+                dropped.append(proc)
+            except Exception as de:
+                err_str = str(de)
+                # ORA-04043: object does not exist → 이미 없는 것이므로 성공으로 처리
+                if "ORA-04043" in err_str or "does not exist" in err_str.lower():
+                    dropped.append(f"{proc}(already gone)")
+                else:
+                    drop_failed.append(f"{proc}({de})")
+
+        block_results.append(f"drop_procedures: dropped={dropped}, failed={drop_failed}")
         clean_conn.commit()
         scur.close()
         clean_conn.close()
-        clean_msg = "cleanup success: " + ", ".join(block_results)
-        _progress(6, 6, "target_cleanup", "pass")
+        cleanup_ok = not drop_failed
+        clean_msg = ("cleanup success: " if cleanup_ok else "cleanup partial: ") + ", ".join(block_results)
+        _progress(6, 6, "target_cleanup", "pass" if cleanup_ok else "fail")
     except Exception as e:
         clean_msg = f"cleanup failed: {e}"
         _progress(6, 6, "target_cleanup", "fail")
@@ -1337,30 +1347,46 @@ def run_step5_repo_only(
             dsn6 = oracledb.makedsn(target_config["host"], int(target_config.get("port") or 1521), sid=target_config["sid"])
             sys_conn = oracledb.connect(user="sys", password=sys_password, dsn=dsn6, mode=oracledb.SYSDBA)
             scur = sys_conn.cursor()
+            s6_results = []
+
+            # Step 6-1: DBMS_SHARED_POOL purge (첫 번째 블록)
             step6_sql = _read_sql_template("step6.txt")
             blocks = _split_oracle_blocks(step6_sql)
             if blocks:
-                for b in blocks:
-                    exec_sql = b.replace("testuser_name := 'maxgauge';", f"testuser_name := '{target_user}';")
-                    exec_sql = exec_sql.replace("test_db_user varchar2(20) := 'maxgauge';", f"test_db_user varchar2(20) := '{target_user}';")
-                    if exec_sql.strip().endswith(";"):
-                        exec_sql = exec_sql.strip()[:-1]
+                b = blocks[0]
+                exec_sql = b.replace("testuser_name := 'maxgauge';", f"testuser_name := '{target_user}';")
+                if exec_sql.strip().endswith(";"):
+                    exec_sql = exec_sql.strip()[:-1]
+                try:
                     scur.execute(exec_sql)
-            else:
-                scur.execute(f"""
-                    DECLARE testuser_name varchar2(64) := '{target_user}';
-                    BEGIN
-                        EXECUTE IMMEDIATE 'DROP PROCEDURE ' || testuser_name || '.qs_sql_test_proc1';
-                        EXECUTE IMMEDIATE 'DROP PROCEDURE ' || testuser_name || '.qs_sql_test_proc2';
-                        EXECUTE IMMEDIATE 'DROP PROCEDURE ' || testuser_name || '.qs_sql_test_proc3';
-                        EXECUTE IMMEDIATE 'DROP PROCEDURE ' || testuser_name || '.qs_sql_test_proc4';
-                        EXECUTE IMMEDIATE 'DROP PROCEDURE ' || testuser_name || '.qs_sql_test_proc5';
-                    END;
-                """)
+                    s6_results.append("shared_pool_purge:ok")
+                except Exception as be:
+                    s6_results.append(f"shared_pool_purge:skip({be})")
+
+            # Step 6-2: 프로시저 개별 DROP (SYS로 실행)
+            _TEST_PROCS = (
+                "qs_sql_test_proc1", "qs_sql_test_proc2", "qs_sql_test_proc3",
+                "qs_sql_test_proc4", "qs_sql_test_proc5",
+            )
+            dropped: List[str] = []
+            drop_failed: List[str] = []
+            for proc in _TEST_PROCS:
+                try:
+                    scur.execute(f"DROP PROCEDURE {target_user}.{proc}")
+                    dropped.append(proc)
+                except Exception as de:
+                    err_str = str(de)
+                    if "ORA-04043" in err_str or "does not exist" in err_str.lower():
+                        dropped.append(f"{proc}(already gone)")
+                    else:
+                        drop_failed.append(f"{proc}({de})")
+
+            s6_results.append(f"drop_procedures: dropped={dropped}, failed={drop_failed}")
             sys_conn.commit()
             scur.close()
             sys_conn.close()
-            clean_msg = "SYS shared pool purge + drop procedures success"
+            clean_msg = ("SYS shared pool purge + drop procedures success: " if not drop_failed
+                         else "SYS cleanup partial: ") + ", ".join(s6_results)
         except Exception as e:
             clean_msg = f"SYS cleanup failed: {e}"
     result_data["cleanup_info"] = clean_msg

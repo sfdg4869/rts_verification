@@ -398,36 +398,6 @@ input::placeholder { color: var(--theme-text-muted); }
         <label>SSH Port</label>
         <input id="sshPort" type="number" value="10022">
       </div>
-      <div>
-        <label>Conf Name (미입력 시 INSTANCE_NAME)</label>
-        <input id="confName" type="text" placeholder="자동">
-      </div>
-      <div>
-        <label>Base Dir (미입력 시 자동 탐색)</label>
-        <input id="baseDir" type="text" placeholder="/home/maxgauge">
-      </div>
-      <div>
-        <label>Host Override (미입력 시 HOST_IP)</label>
-        <input id="hostOverride" type="text" placeholder="">
-      </div>
-      <div>
-        <label>실패 시 정책</label>
-        <select id="onFailure">
-          <option value="run_all">run_all — 전체 실행</option>
-          <option value="stop_at_first_failure">stop_at_first_failure — 첫 실패에서 중단</option>
-        </select>
-      </div>
-      <div style="display:flex;flex-direction:column;gap:6px">
-        <label>rtsctl stop 검증</label>
-        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:400">
-          <input type="checkbox" id="verifyStop" style="width:16px;height:16px;cursor:pointer">
-          <span>점검 후 <b>rtsctl stop</b> 실행 및 종료 확인</span>
-        </label>
-        <div id="stopWaitSecWrap" style="display:none;margin-top:4px">
-          <label style="font-size:.8rem;color:var(--text2)">stop 대기 시간 (초)</label>
-          <input id="stopWaitSec" type="number" value="10" min="1" max="120" style="width:80px">
-        </div>
-      </div>
     </div>
   </div>
 
@@ -454,7 +424,7 @@ input::placeholder { color: var(--theme-text-muted); }
       <span class="step-label">3. PID 교차검증</span>
       <span class="step-label">4. ERROR grep</span>
       <span class="step-label">5. 비정상 종료 시그널</span>
-      <span class="step-label" id="stepLabelStopVerify" style="display:none;color:var(--warn)">6. rtsctl stop 검증</span>
+      <span class="step-label" id="stepLabelStopVerify" style="color:var(--warn)">6. rtsctl stop 검증</span>
     </div>
     <div class="status-msg" style="color:var(--text2);margin:8px 0 6px">Repo 점검 항목 (SQL)</div>
     <div class="step-labels">
@@ -467,10 +437,7 @@ input::placeholder { color: var(--theme-text-muted); }
     </div>
     <div class="btn-row" style="margin-top:12px">
       <button class="btn btn-primary" id="btnRun" disabled>Target 점검 실행 (SSH)</button>
-      <button class="btn btn-secondary" id="btnRunTargetSql" disabled>Target 점검 실행 (SQL)</button>
-      <button class="btn btn-primary" id="btnRunRepo">Repo 점검 실행</button>
       <span id="runStatus" class="hidden"></span>
-      <span id="targetSqlStatus" class="hidden"></span>
     </div>
   </div>
 
@@ -553,8 +520,7 @@ input::placeholder { color: var(--theme-text-muted); }
       </div>
     </div>
     <div class="btn-row" style="flex-wrap:wrap;gap:8px">
-      <button class="btn btn-primary" id="btnRunRepoNew" style="background:#0a3a40;">전체 실행 (Step1~6)</button>
-      <button class="btn btn-secondary" id="btnRunRepoSteps14" style="background:#145a32;color:#fff;">Target만 실행 (Step1~4)</button>
+<button class="btn btn-secondary" id="btnRunRepoSteps14" style="background:#145a32;color:#fff;">Target만 실행 (Step1~4)</button>
       <button class="btn btn-secondary" id="btnRunRepoStep5" style="background:#1a5276;color:#fff;">Repo만 조회 (Step5~6)</button>
       <input type="password" id="sysPassword" placeholder="SYS 비밀번호(선택)" style="width: 160px;">
     </div>
@@ -1217,7 +1183,6 @@ function selectRow(tr) {
   `;
   $('targetPassword').value = '';
   $('btnRun').disabled = false;
-  $('btnRunTargetSql').disabled = false;
   $('btnCpuMemSnapshot').disabled = false;
   $('btnCpuMemWindow').disabled = false;
   $('btnCpuMemStartPoll').disabled = false;
@@ -1239,16 +1204,9 @@ $('btnRun').onclick = async () => {
     ssh_user: $('sshUser').value.trim(),
     ssh_password: $('sshPassword').value,
     ssh_port: parseInt($('sshPort').value) || 22,
-    on_failure: $('onFailure').value,
-    verify_stop: $('verifyStop').checked,
-    stop_wait_sec: parseInt($('stopWaitSec').value) || 10,
+    on_failure: 'run_all',
+    verify_stop: true,
   };
-  const cn = $('confName').value.trim();
-  const bd = $('baseDir').value.trim();
-  const ho = $('hostOverride').value.trim();
-  if (cn) body.conf_name = cn;
-  if (bd) body.base_dir = bd;
-  if (ho) body.host_override = ho;
 
   if (!body.ssh_user || !body.ssh_password) {
     st.textContent = 'SSH User / Password를 입력해주세요';
@@ -1274,8 +1232,8 @@ $('btnRun').onclick = async () => {
   }
 };
 
-// ─── Run Repo Check ────────────────────────
-$('btnRunRepo').onclick = async () => {
+// ─── (btnRunRepo 제거됨) ────────────────────
+if (false && $('btnRunRepo')) $('btnRunRepo').onclick = async () => {
   const btn = $('btnRunRepo');
   const st = $('runStatus');
   if (!repoReady) {
@@ -1343,8 +1301,8 @@ $('btnRunRepo').onclick = async () => {
   }
 };
 
-// ─── Run Target SQL Test ───────────────────
-$('btnRunTargetSql').onclick = async () => {
+// ─── (btnRunTargetSql 제거됨) ──────────────
+if (false && $('btnRunTargetSql')) $('btnRunTargetSql').onclick = async () => {
   const statusEl = $('targetSqlStatus');
   if (!selectedRow?.db_id) {
     statusEl.classList.remove('hidden');
@@ -1413,12 +1371,6 @@ function getCpuMemReqBody() {
     ssh_password: sshPassword,
     ssh_port: parseInt($('sshPort').value) || 22,
   };
-  const cn = $('confName').value.trim();
-  const bd = $('baseDir').value.trim();
-  const ho = $('hostOverride').value.trim();
-  if (cn) body.conf_name = cn;
-  if (bd) body.base_dir = bd;
-  if (ho) body.host_override = ho;
   return body;
 }
 
@@ -1433,6 +1385,39 @@ function renderCpuMemResult(data) {
   if (data.error) {
     wrap.innerHTML = `<div class="step-card"><div class="evidence">${escHtml(data.error)}</div></div>`;
     return;
+  }
+
+  // 2시간 집계 수집 중 / 완료 배너
+  let windowBanner = '';
+  if (data.mode === 'window') {
+    if (data.collecting_in_progress) {
+      const elapsed = data.elapsed_minutes ?? 0;
+      const remaining = data.remaining_minutes ?? 0;
+      const winMin = data.window_minutes || 120;
+      const pct = Math.min(100, Math.round((elapsed / winMin) * 100));
+      const interval = data.collect_interval_sec || 60;
+      windowBanner = `
+        <div style="background:#fff8e1;border:1px solid #f9a825;border-radius:6px;padding:10px 14px;margin-bottom:10px">
+          <div style="font-weight:600;color:#e65100;margin-bottom:4px">
+            ⏱ 수집 중 — ${elapsed}분 경과 / ${winMin}분 (남은 시간: ${remaining}분)
+          </div>
+          <div style="background:#ffe082;border-radius:4px;height:8px;overflow:hidden;margin-bottom:6px">
+            <div style="background:#f57c00;height:100%;width:${pct}%;transition:width 0.3s"></div>
+          </div>
+          <div style="font-size:12px;color:#5d4037">
+            ${interval}초마다 자동 수집 중 &nbsp;|&nbsp; 현재 ${data.sample_count_total || 0}개 샘플 누적
+            &nbsp;|&nbsp; <b>결과는 ${winMin}분 후 완료됩니다</b>
+          </div>
+        </div>`;
+    } else {
+      const winMin = data.window_minutes || 120;
+      windowBanner = `
+        <div style="background:#e8f5e9;border:1px solid #43a047;border-radius:6px;padding:10px 14px;margin-bottom:10px">
+          <div style="font-weight:600;color:#2e7d32">
+            ✅ 수집 완료 — ${winMin}분 집계 결과 (총 ${data.sample_count_total || 0}개 샘플)
+          </div>
+        </div>`;
+    }
   }
 
   const head = `
@@ -1486,7 +1471,7 @@ function renderCpuMemResult(data) {
       </div>`
     : '';
 
-  wrap.innerHTML = head + rows + note + logFile + downloadBtns;
+  wrap.innerHTML = windowBanner + head + rows + note + logFile + downloadBtns;
 
   if (data.mode === 'window' && (data.metrics || []).length > 0) {
     _lastWindowData = data;
@@ -1537,7 +1522,7 @@ $('btnCpuMemWindow').onclick = async () => {
     other.disabled = true;
     st.classList.remove('hidden');
     st.style.color = 'var(--text2)';
-    st.innerHTML = '<span class="spinner"></span> CPU/MEM 2시간 집계 조회 중...';
+    st.innerHTML = '<span class="spinner"></span> CPU/MEM 2시간 집계 세션 시작/조회 중...';
     const res = await fetch(`${API_RTS}/cpu-mem/window`, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
@@ -1906,7 +1891,6 @@ function escHtml(s) {
 function resetTargetDbArea() {
   selectedRow = null;
   $('btnRun').disabled = true;
-  $('btnRunTargetSql').disabled = true;
   $('btnCpuMemSnapshot').disabled = true;
   $('btnCpuMemWindow').disabled = true;
   $('btnCpuMemStartPoll').disabled = true;
@@ -1925,8 +1909,6 @@ function resetResultArea() {
   $('resultContent').innerHTML = '';
   $('runStatus').classList.add('hidden');
   $('runStatus').textContent = '';
-  $('targetSqlStatus').classList.add('hidden');
-  $('targetSqlStatus').textContent = '';
   $('cpuMemResult').classList.add('hidden');
   $('cpuMemResult').innerHTML = '';
   $('cpuMemStatus').classList.add('hidden');
@@ -1934,7 +1916,8 @@ function resetResultArea() {
 }
 
 // ─── Run New Repo Check ────────────────────
-$('btnRunRepoNew').onclick = async () => {
+// ─── (btnRunRepoNew 제거됨) ─────────────────
+if (false && $('btnRunRepoNew')) $('btnRunRepoNew').onclick = async () => {
   const btn = $('btnRunRepoNew');
   const st = $('repoNewStatus');
   if (!selectedRow?.db_id) {
@@ -2033,6 +2016,7 @@ $('btnRunRepoSteps14').onclick = async () => {
     st.classList.remove('hidden'); st.style.color = 'var(--fail)'; st.textContent = 'Step 2에서 Target DB를 먼저 선택해주세요.'; return;
   }
   btn.disabled = true;
+  const _startedAt = new Date();
   st.classList.remove('hidden'); st.style.color = 'var(--text2)'; st.innerHTML = '<span class="spinner"></span> Target Step1~4 Job 시작 중...';
   try {
     const targetPassword = ($('targetPassword')?.value || '');
@@ -2048,6 +2032,10 @@ $('btnRunRepoSteps14').onclick = async () => {
     const started = await res.json().catch(() => ({}));
     if (!res.ok || !started.job_id) throw new Error(started.error || 'job start failed');
     const job = await _pollRepoJob(started.job_id, 'Target 실행 중...', 4, st);
+    const _endedAt = new Date();
+    const _fmtTime = (d) => d.toLocaleString('ko-KR', {hour12: false});
+    const _durSec = Math.round((_endedAt - _startedAt) / 1000);
+
     // Step1~4 결과에서 logging_time / partition_date 자동 채우기
     const d14 = (job.result || {}).data || {};
     if (d14.logging_time) {
@@ -2058,6 +2046,28 @@ $('btnRunRepoSteps14').onclick = async () => {
       const pdInp = $('repoPartitionDate');
       if (pdInp) { pdInp.value = d14.partition_date; pdInp.style.background = '#fffde7'; }
     }
+
+    // SQL ID / 실행 시각 정보 박스 표시
+    const sqlIds = d14.case_sql_ids || d14.case_actual_sql_ids || {};
+    const sqlIdLines = Object.entries(sqlIds).map(([k, v]) => `  ${k}: ${v || '-'}`).join('\n');
+    const steps14InfoBox = document.createElement('div');
+    steps14InfoBox.style.cssText = 'background:#f0f4ff;border:1px solid #90caf9;border-radius:6px;padding:10px 14px;margin-top:8px;font-size:13px;white-space:pre-wrap;font-family:monospace';
+    steps14InfoBox.textContent = [
+      `▶ 실행 시작: ${_fmtTime(_startedAt)}`,
+      `▶ 실행 종료: ${_fmtTime(_endedAt)}  (소요: ${_durSec}초)`,
+      `▶ logging_time: ${d14.logging_time || '-'}`,
+      `▶ partition_date: ${d14.partition_date || '-'}`,
+      sqlIdLines ? `▶ SQL ID:\n${sqlIdLines}` : '▶ SQL ID: (없음)',
+    ].join('\n');
+    const resultWrap = $('repoNewResultWrap');
+    if (resultWrap) {
+      // 기존 steps14 박스가 있으면 교체
+      const prev = resultWrap.querySelector('.steps14-info');
+      if (prev) prev.remove();
+      steps14InfoBox.classList.add('steps14-info');
+      resultWrap.insertBefore(steps14InfoBox, resultWrap.firstChild);
+    }
+
     st.classList.remove('hidden');
     // 권장 조회 시각 계산 → 카운트다운 시작
     const recTime = d14.logging_time ? calcRecommendedQueryTime(d14.logging_time) : null;
@@ -2530,13 +2540,6 @@ function renderNewRepoResultGrid(json) {
   `;
   content.innerHTML = gridHtml;
 }
-
-// ─── verifyStop 체크박스 — stopWaitSec 및 step label 표시/숨김 ───
-$('verifyStop').addEventListener('change', function() {
-  $('stopWaitSecWrap').style.display = this.checked ? 'block' : 'none';
-  const lbl = $('stepLabelStopVerify');
-  if (lbl) lbl.style.display = this.checked ? '' : 'none';
-});
 
 // ─── Init ──────────────────────────────────
 resetTargetDbArea();

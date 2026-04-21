@@ -16,7 +16,7 @@ MAX_OUTPUT_BYTES = 10 * 1024  # 10 KB
 SSH_CONNECT_TIMEOUT = 10
 CMD_TIMEOUT = 15
 
-DAEMONS = ["rts", "sndf", "obsd"]
+DAEMONS = ["rts", "sndf", "obsd", "updater"]
 
 _SENSITIVE_PATTERNS = re.compile(
     r"(password|passwd|pwd|secret|token)[=:\s]+\S+", re.IGNORECASE
@@ -305,55 +305,57 @@ def _step_rtsctl_stop_verify(
     stop_wait_sec: int = 10,
 ) -> Dict[str, Any]:
     """
-    rtsctl stop 수행 후 정상 중지 확인.
+    rtsctl stop → 중지 확인 → rtsctl start 재기동.
 
     검증 항목:
-      1. rtsctl stop 실행
-      2. rtsctl stat → rts/sndf/obsd 모두 "does not exist" 확인
+      1. rtsctl stop + rtsctl stop_updater 실행
+      2. rtsctl stat → 모든 daemon "does not exist/stopped" 확인
       3. ps -ef | grep {conf_name} → 관련 PID 없음 확인
+      4. rtsctl start 실행 (재기동)
     """
     t0 = time.time()
     prefix = _mxgrc_prefix(conf_dir)
     evidence_lines: List[str] = []
     failed: List[str] = []
 
-    # ── 1. rtsctl stop 실행 ──────────────────────────────────────────
+    # ── 1. stop 실행 ─────────────────────────────────────────────────
+    # updater는 별도 명령으로 종료 (rtsctl stop_updater)
     stop_out, stop_err, stop_rc = ssh.run(f"{prefix} && rtsctl stop 2>&1")
     stop_combined = (stop_out + "\n" + stop_err).strip()
     evidence_lines.append(f"[rtsctl stop rc={stop_rc}] {stop_combined[:300]}")
 
-    # stop 완료까지 대기
+    upd_out, upd_err, upd_rc = ssh.run(f"{prefix} && rtsctl stop_updater 2>&1")
+    upd_combined = (upd_out + "\n" + upd_err).strip()
+    evidence_lines.append(f"[rtsctl stop_updater rc={upd_rc}] {upd_combined[:300]}")
+
     if stop_wait_sec > 0:
         time.sleep(stop_wait_sec)
 
-    # ── 2. rtsctl stat → "does not exist" 확인 ───────────────────────
+    # ── 2. 중지 확인: rtsctl stat ────────────────────────────────────
     stat_out, stat_err, _ = ssh.run(f"{_mxgrc_prefix(conf_dir)} && rtsctl stat 2>&1")
-    stat_combined = (stat_out + "\n" + stat_err)
+    stat_combined = stat_out + "\n" + stat_err
     evidence_lines.append(f"[rtsctl stat after stop]\n{stat_combined[:500]}")
 
-    daemon_status: Dict[str, str] = {}
+    stop_status: Dict[str, str] = {}
     for daemon in DAEMONS:
         block_match = re.search(rf"(?is)\b{daemon}\b[^;\n]*", stat_combined)
         block = block_match.group(0) if block_match else ""
         block_low = block.lower()
-
         if "does not exist" in block_low:
-            daemon_status[daemon] = "DOES_NOT_EXIST"
+            stop_status[daemon] = "DOES_NOT_EXIST"
         elif "not running" in block_low or "stopped" in block_low:
-            daemon_status[daemon] = "STOPPED"
+            stop_status[daemon] = "STOPPED"
         elif "running" in block_low:
-            daemon_status[daemon] = "STILL_RUNNING"
+            stop_status[daemon] = "STILL_RUNNING"
         else:
-            daemon_status[daemon] = block.strip() if block.strip() else "UNKNOWN"
+            stop_status[daemon] = block.strip() if block.strip() else "UNKNOWN"
 
-    stat_parts = [f"{d}: {s}" for d, s in daemon_status.items()]
-    evidence_lines.append("[stat check] " + "; ".join(stat_parts))
-
-    not_stopped = [d for d, s in daemon_status.items() if s not in ("DOES_NOT_EXIST", "STOPPED")]
+    evidence_lines.append("[stop stat] " + "; ".join(f"{d}: {s}" for d, s in stop_status.items()))
+    not_stopped = [d for d, s in stop_status.items() if s not in ("DOES_NOT_EXIST", "STOPPED")]
     if not_stopped:
-        failed.append(f"rtsctl stat: 중지 미확인 daemon={not_stopped}")
+        failed.append(f"stop 미확인 daemon={not_stopped}")
 
-    # ── 3. ps -ef | grep {conf_name} → PID 없음 확인 ─────────────────
+    # ── 3. ps 잔존 PID 확인 ──────────────────────────────────────────
     safe_conf = _shell_quote(conf_name)
     ps_out, _, _ = ssh.run(
         f"ps -ef 2>/dev/null | grep {safe_conf} | grep -v grep || true"
@@ -364,6 +366,11 @@ def _step_rtsctl_stop_verify(
         failed.append(f"ps: {len(ps_lines)}개 프로세스 잔존")
     else:
         evidence_lines.append(f"[ps check] PASS — {conf_name} 관련 PID 없음")
+
+    # ── 4. rtsctl start 실행 (stop 검증 결과와 무관하게 항상 재기동) ──
+    start_out, start_err, start_rc = ssh.run(f"{_mxgrc_prefix(conf_dir)} && rtsctl start 2>&1")
+    start_combined = (start_out + "\n" + start_err).strip()
+    evidence_lines.append(f"[rtsctl start rc={start_rc}] {start_combined[:300]}")
 
     status = "pass" if not failed else "fail"
     return _step_result(
@@ -384,14 +391,14 @@ def _find_latest_log(ssh: _SSHSession, log_dir: str, daemon: str) -> Optional[st
 
 
 def _step_error_grep(ssh: _SSHSession, conf_dir: str) -> Dict[str, Any]:
-    """Step 4: {conf_dir}/log/maxgauge/ 에서 rts/sndf/obsd 로그의 SIGBUS 등 비정상 시그널 grep.
+    """Step 4: {conf_dir}/log/maxgauge/ 에서 rts/sndf/obsd 로그의 [FATA] / [ERRO] 키워드 grep.
     키워드가 없으면 PASS, 있으면 FAIL."""
     t0 = time.time()
     log_dir = _log_root(conf_dir)
-    keyword_pattern = "|".join(_ABNORMAL_KEYWORDS)
+    # [FATA] 또는 [ERRO] 패턴 — grep -F 로 고정 문자열 매칭 (정규식 불필요)
     findings: List[str] = []
     error_samples: List[str] = []
-    has_signal = False
+    has_error = False
     has_missing = False
 
     for daemon in DAEMONS:
@@ -402,16 +409,17 @@ def _step_error_grep(ssh: _SSHSession, conf_dir: str) -> Dict[str, Any]:
             continue
 
         fname = log_file.rsplit("/", 1)[-1]
-        cmd = f"grep -iE '{keyword_pattern}' {log_file} | tail -5"
-        out, err, rc = ssh.run(cmd)
+        # grep -F: 고정 문자열, -e: 패턴 여러 개
+        cmd = f"grep -F -e '[FATA]' -e '[ERRO]' {log_file} 2>/dev/null | tail -5"
+        out, _, _ = ssh.run(cmd)
         text = out.strip()
         if text:
-            has_signal = True
+            has_error = True
             lines = text.splitlines()
             findings.append(f"{fname}: {len(lines)} hit(s) — {lines[-1][:200]}")
-            error_samples.append(f"[{fname}] signal hit logs:\n{text}")
+            error_samples.append(f"[{fname}] error logs:\n{text}")
         else:
-            findings.append(f"{fname}: clean (no abnormal signal)")
+            findings.append(f"{fname}: clean (no [FATA]/[ERRO])")
 
     evidence = "; ".join(findings)
     if error_samples:
@@ -419,7 +427,7 @@ def _step_error_grep(ssh: _SSHSession, conf_dir: str) -> Dict[str, Any]:
 
     return _step_result(
         "error_log_grep",
-        "fail" if (has_signal or has_missing) else "pass",
+        "fail" if (has_error or has_missing) else "pass",
         evidence,
         _elapsed_ms(t0),
     )
@@ -694,27 +702,30 @@ def _resolve_conf_dir(
         """root 아래에서 conf_name에 매칭되는 conf_dir을 단일 SSH 호출로 반환.
         경로 또는 .mxgrc 내용에 conf_name이 있으면 매칭.
         HP-UX/SunOS: shell glob 순회, Linux/AIX: find (-follow for AIX).
+        ※ case 문으로 경로 매칭 — 중첩 파이프 없이 모든 POSIX sh 호환.
         """
         rq = _shell_quote(root)
+        # case 문: 파이프 없이 경로에 conf_name 포함 여부 확인 (POSIX 호환)
+        path_case = f"case \"$_d\" in *{conf_name}*|*{conf_name_upper}*) true ;; *) false ;; esac"
         grep_content = (
             f"grep {conf_q} \"$_d/.mxgrc\" > /dev/null 2>&1 "
             f"|| grep {conf_name_upper_q} \"$_d/.mxgrc\" > /dev/null 2>&1"
         )
-        grep_path = f"echo \"$_d\" | grep {conf_q} > /dev/null 2>&1"
+        match_cond = f"( {path_case} || {grep_content} )"
 
         if os_type == "aix":
             # AIX: -follow 로 심볼릭 링크 디렉터리도 탐색
             cmd = (
                 f"find {rq} -follow -maxdepth 8 -name '.mxgrc' 2>/dev/null | while read _f; do "
                 f"  _d=$(dirname \"$_f\"); "
-                f"  ( {grep_path} || {grep_content} ) && echo \"$_d\" && break; "
+                f"  {match_cond} && echo \"$_d\" && break; "
                 f"done 2>/dev/null | head -1"
             )
         elif os_type in ("linux", "unknown"):
             cmd = (
                 f"find {rq} -maxdepth 8 -name '.mxgrc' 2>/dev/null | while read _f; do "
                 f"  _d=$(dirname \"$_f\"); "
-                f"  ( {grep_path} || {grep_content} ) && echo \"$_d\" && break; "
+                f"  {match_cond} && echo \"$_d\" && break; "
                 f"done 2>/dev/null | head -1"
             )
         else:
@@ -722,11 +733,11 @@ def _resolve_conf_dir(
             cmd = (
                 f"for _d in {rq} {rq}/* {rq}/*/* {rq}/*/*/*; do "
                 f"  if test -f \"$_d/.mxgrc\"; then "
-                f"    ( {grep_path} || {grep_content} ) && echo \"$_d\" && break; "
+                f"    {match_cond} && echo \"$_d\" && break; "
                 f"  fi; "
                 f"done 2>/dev/null | head -1"
             )
-        out, _, _ = _safe_run(cmd, timeout=25)
+        out, _, _ = _safe_run(cmd, timeout=40)
         lines = [l.strip() for l in out.strip().splitlines() if l.strip()]
         return lines[0] if lines else None
 
@@ -898,9 +909,11 @@ def _resolve_conf_dir(
     # test -f 로만 확인 → SSH 1 round-trip per path, OS 무관.
     # 단일 인스턴스 설치의 경우 conf_name 이름 없이 maxgauge 디렉터리 자체가 conf_dir.
     checked5: List[str] = []
+    existing_roots: List[str] = []   # step6/7 에서 재사용 (중복 _dir_exists 호출 방지)
     for root in roots:
         if not _dir_exists(root):
             continue
+        existing_roots.append(root)
         for cand in [
             f"{root}/{conf_name}",
             f"{root}/maxgauge/{conf_name}",
@@ -921,12 +934,12 @@ def _resolve_conf_dir(
             checked5.append(cand)
             if _check_dir(cand):
                 return cand, f"step5 direct check → {cand}"
-    diag.append(f"step5 checked {len(checked5)} paths, none matched")
+    diag.append(f"step5 checked {len(checked5)} paths, none matched. existing_roots={existing_roots}")
 
     # ── 6) 각 루트 아래 .mxgrc 탐색 + conf_name 매칭 (단일 SSH 호출) ──────
-    for root in roots:
-        if not _dir_exists(root):
-            continue
+    # existing_roots 는 step5 에서 이미 존재 확인됨 → _dir_exists 재호출 불필요
+    diag.append(f"step6 start: searching {len(existing_roots)} roots")
+    for root in existing_roots:
         d = _find_matching_conf_dir_in(root)
         if d:
             return d, f"step6 .mxgrc match → {d}"
@@ -938,16 +951,14 @@ def _resolve_conf_dir(
         sample_roots.append(user_home)
     if cwd_path.startswith("/"):
         sample_roots.append(cwd_path.rsplit("/", 1)[0])
-    sample_roots += [r for r in dyn_roots if _dir_exists(r)][:5]
+    sample_roots += [r for r in existing_roots if r in set(dyn_roots)][:5]
     for root in sample_roots:
         found6.extend(_find_mxgrc_in(root))
     diag.append(f"step6 no match. sample .mxgrc files (from {sample_roots}): {found6[:20]}")
 
     # ── 7) 각 루트 아래 rtsctl 위치로 역추적 ───────────────────────────
     found7: List[str] = []
-    for root in roots:
-        if not _dir_exists(root):
-            continue
+    for root in existing_roots:
         for rpath in _find_rtsctl_in(root):
             found7.append(rpath)
             d = _rtsctl_to_dir(rpath)

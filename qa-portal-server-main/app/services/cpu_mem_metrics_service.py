@@ -14,7 +14,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from app.services.rts_check_service import (
     DAEMONS,
     _SSHSession,
-    _resolve_base_dir,
+    _detect_os,
+    _resolve_conf_dir,
     _step_rtsctl_stat,
     get_apm_db_row,
 )
@@ -309,8 +310,11 @@ def _collect_snapshot(
         return {"error": f"SSH connection failed: {e}", "overall_status": "error", "metrics": []}
 
     try:
-        resolved_base = _resolve_base_dir(ssh, resolved_conf, base_dir)
-        _, pid_map = _step_rtsctl_stat(ssh, resolved_base, resolved_conf)
+        os_type = _detect_os(ssh)
+        resolved_base, _path_diag = _resolve_conf_dir(ssh, resolved_conf, base_dir, os_type=os_type)
+        if not resolved_base:
+            return {"error": f"conf_dir not found: {_path_diag}", "overall_status": "error", "metrics": []}
+        _, pid_map = _step_rtsctl_stat(ssh, resolved_base)
 
         metrics: List[Dict[str, Any]] = []
         now_ts = int(time.time())
@@ -508,6 +512,10 @@ def collect_cpu_mem_window(window_minutes: int = 120, **kwargs) -> Dict[str, Any
             "vsz_max_kb": vsz_max,
         })
 
+    now_ts2 = int(time.time())
+    elapsed_sec = max(0, now_ts2 - start_ts)
+    remaining_sec = max(0, end_ts - now_ts2)
+    collecting_in_progress = now_ts2 < end_ts
     overall = "pass" if pass_daemon_count > 0 else ("fail" if total_samples == 0 else "skip")
     return {
         "overall_status": overall,
@@ -520,6 +528,9 @@ def collect_cpu_mem_window(window_minutes: int = 120, **kwargs) -> Dict[str, Any
         "window_start_ts": start_ts,
         "window_end_ts": end_ts,
         "window_started_now": started_now,
+        "collecting_in_progress": collecting_in_progress,
+        "elapsed_minutes": round(elapsed_sec / 60, 1),
+        "remaining_minutes": round(remaining_sec / 60, 1),
         "log_file": (_WINDOW_META.get(session_key) or {}).get("file_path"),
         "collect_interval_sec": _COLLECT_INTERVAL_SECONDS,
         "collector_running": bool(_COLLECTOR_THREADS.get(session_key) and _COLLECTOR_THREADS[session_key].is_alive()),
