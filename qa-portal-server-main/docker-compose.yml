@@ -3,41 +3,15 @@ services:
     build: .
     image: qa-portal-server:local
     ports:
-      - "8283:5000"
+      - "5000:5000"
     env_file:
-      - path: .env
-        required: false
-    # Oracle이 같은 VM 호스트에서 돌 때: DB host를 localhost가 아니라 VM IP 또는 host.docker.internal 로 두세요.
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - .env
     environment:
+      # MongoDB 등 없이 로컬 JSON만 쓸 때는 비워도 됨
       MONGODB_URI: ${MONGODB_URI:-}
-      TZ: Asia/Seoul
-      # ORACLE_CLIENT_LIB_DIR 는 Dockerfile에서 기본 설정. 다른 IC 경로를 쓰려면 여기만 추가.
     volumes:
-      # Job 상태·jsonl 로그 등 유지 (필요 없으면 제거)
+      # 컨테이너 밖에서 DB 프로필·설정 유지 (없으면 주석 처리)
+      - ./db_setup.json:/app/db_setup.json
+      - ./db_config.json:/app/db_config.json
       - ./app/resource:/app/app/resource
     restart: unless-stopped
-
-
-
-# services:
-#   web:
-#     build: .
-#     image: qa-portal-server:local
-#     ports:
-#       - "8283:5000"
-#     env_file:
-#       - path: .env
-#         required: false
-#     # Oracle이 같은 VM 호스트에서 돌 때: DB host를 localhost가 아니라 VM IP 또는 host.docker.internal 로 두세요.
-#     extra_hosts:
-#       - "host.docker.internal:host-gateway"
-#     environment:
-#       MONGODB_URI: ${MONGODB_URI:-}
-#       TZ: Asia/Seoul
-#       # ORACLE_CLIENT_LIB_DIR 는 Dockerfile에서 기본 설정. 다른 IC 경로를 쓰려면 여기만 추가.
-#     volumes:
-#       # Job 상태·jsonl 로그 등 유지 (필요 없으면 제거)
-#       - ./app/resource:/app/app/resource
-#     restart: unless-stopped
