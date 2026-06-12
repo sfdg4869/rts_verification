@@ -636,6 +636,84 @@ def run_check_multi():
         return jsonify({"error": str(e)}), 500
 
 
+@bp.route("/discover", methods=["POST"])
+def run_discover_services_api():
+    """Discover service presence/runtime using the internal strategy engine."""
+    from app.services.rts_check_service import run_service_discovery
+
+    data = request.get_json(silent=True) or {}
+    ssh_user = data.get("ssh_user")
+    ssh_password = data.get("ssh_password")
+    db_id = data.get("db_id")
+    host_ip = data.get("host_ip")
+
+    if not ssh_user or not ssh_password:
+        return jsonify({"error": "ssh_user and ssh_password are required"}), 400
+    if db_id is None and not host_ip:
+        return jsonify({"error": "db_id or host_ip is required"}), 400
+
+    target_services = data.get("target_services")
+    if target_services is not None and not isinstance(target_services, list):
+        return jsonify({"error": "target_services must be an array"}), 400
+
+    try:
+        result = run_service_discovery(
+            ssh_user=ssh_user,
+            ssh_password=ssh_password,
+            ssh_port=int(data.get("ssh_port", 22)),
+            db_id=int(db_id) if db_id is not None else None,
+            host_ip=host_ip,
+            conf_name=data.get("conf_name"),
+            base_dir=data.get("base_dir"),
+            host_override=data.get("host_override"),
+            target_services=target_services,
+        )
+        status_code = 200 if result.get("overall_status") != "error" else 500
+        return jsonify(result), status_code
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route("/control", methods=["POST"])
+def run_process_control_api():
+    """Process start/stop control using per-target control credentials."""
+    from app.services.rts_check_service import run_process_control
+
+    data = request.get_json(silent=True) or {}
+    db_id = data.get("db_id")
+    action = data.get("action")
+    target = data.get("target")
+    control_credentials = data.get("control_credentials")
+
+    if not db_id:
+        return jsonify({"error": "db_id is required"}), 400
+    if not action:
+        return jsonify({"error": "action is required"}), 400
+    if not target:
+        return jsonify({"error": "target is required"}), 400
+    if not isinstance(control_credentials, dict):
+        return jsonify({"error": "control_credentials is required"}), 400
+
+    try:
+        result = run_process_control(
+            db_id=int(db_id),
+            action=action,
+            target=target,
+            control_credentials=control_credentials,
+            conf_name=data.get("conf_name"),
+            base_dir=data.get("base_dir"),
+            host_override=data.get("host_override"),
+        )
+        status_code = 200 if result.get("overall_status") != "error" else 500
+        return jsonify(result), status_code
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @bp.route("/run-repo", methods=["POST"])
 @swag_from(_RUN_REPO_SPEC)
 def run_repo_check_api():
@@ -1149,3 +1227,126 @@ def cpu_mem_window_api():
         return jsonify(result), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# ── WS 정합성 검증 ─────────────────────────────────────────────────────────
+
+_WS_STOP_EVENTS: dict = {}  # job_id → threading.Event
+
+
+@bp.route("/ws-consistency/run", methods=["POST"])
+def run_ws_consistency_job_api():
+    """MaxGauge WS 정합성 검증 실시간 job 시작"""
+    from app.services.ws_consistency_service import run_ws_consistency_realtime
+
+    data = request.get_json(silent=True) or {}
+    config_id        = (data.get("config_id") or "").strip()
+    mg_url           = (data.get("mg_url") or "http://10.10.47.72:19190/MAXGAUGE").strip()
+    mg_user          = (data.get("mg_user") or "").strip()
+    mg_password      = data.get("mg_password") or ""
+    interval_secs    = int(data.get("interval_seconds") or 30)
+    monitor_url      = (data.get("monitor_url") or "").strip()
+
+    if not config_id:
+        return jsonify({"error": "config_id is required"}), 400
+    if not mg_user or not mg_password:
+        return jsonify({"error": "mg_user and mg_password are required"}), 400
+
+    job_id     = str(uuid.uuid4())
+    stop_event = threading.Event()
+    _WS_STOP_EVENTS[job_id] = stop_event
+
+    with _REPO_JOB_LOCK:
+        _REPO_JOBS[job_id] = {
+            "job_id": job_id,
+            "type": "ws_consistency",
+            "status": "running",
+            "started_at": int(time.time()),
+            "completed_steps": 0,
+            "total_steps": 3,
+            "current_step": "",
+            "current_step_status": "",
+            "progress_pct": 0,
+            "result": None,
+            "error": None,
+        }
+        _persist_repo_jobs()
+
+    def _worker():
+        def _progress(done: int, total: int, step_name: str, step_status: str):
+            with _REPO_JOB_LOCK:
+                job = _REPO_JOBS.get(job_id)
+                if not job:
+                    return
+                job["completed_steps"] = int(done)
+                job["total_steps"] = int(total)
+                job["current_step"] = step_name
+                job["current_step_status"] = step_status
+                job["progress_pct"] = int((done / total) * 100) if total else 0
+                _persist_repo_jobs()
+
+        def _on_result(result: dict):
+            with _REPO_JOB_LOCK:
+                job = _REPO_JOBS.get(job_id)
+                if job:
+                    job["result"] = result
+                    _persist_repo_jobs()
+
+        try:
+            run_ws_consistency_realtime(
+                config_id=config_id,
+                mg_url=mg_url,
+                mg_user=mg_user,
+                mg_password=mg_password,
+                interval_seconds=interval_secs,
+                monitor_url=monitor_url,
+                stop_event=stop_event,
+                result_callback=_on_result,
+                progress_callback=_progress,
+            )
+            with _REPO_JOB_LOCK:
+                job = _REPO_JOBS.get(job_id)
+                if job:
+                    job["status"] = "stopped"
+                    job["current_step"] = "중지됨"
+                    job["current_step_status"] = "done"
+                    _persist_repo_jobs()
+        except Exception as e:
+            with _REPO_JOB_LOCK:
+                job = _REPO_JOBS.get(job_id)
+                if job:
+                    job["status"] = "error"
+                    job["error"] = str(e)
+                    _persist_repo_jobs()
+        finally:
+            _WS_STOP_EVENTS.pop(job_id, None)
+
+    threading.Thread(
+        target=_worker, daemon=True, name=f"ws-consistency-{job_id[:8]}"
+    ).start()
+    return jsonify({"job_id": job_id, "status": "running"}), 202
+
+
+@bp.route("/ws-consistency/stop/<job_id>", methods=["POST"])
+def stop_ws_consistency_job_api(job_id: str):
+    """WS 정합성 검증 job 중지"""
+    event = _WS_STOP_EVENTS.get(job_id)
+    if event:
+        event.set()
+    with _REPO_JOB_LOCK:
+        job = _REPO_JOBS.get(job_id)
+        if job:
+            job["current_step"] = "중지 요청됨"
+            _persist_repo_jobs()
+    return jsonify({"ok": True}), 200
+
+
+@bp.route("/ws-consistency/result/<job_id>", methods=["GET"])
+def run_ws_consistency_result_api(job_id: str):
+    """WS 정합성 검증 job 상태 및 결과 조회"""
+    with _REPO_JOB_LOCK:
+        _load_repo_jobs_from_disk()
+        job = _REPO_JOBS.get(job_id)
+        if not job:
+            return jsonify({"error": "job not found"}), 404
+        return jsonify(job), 200

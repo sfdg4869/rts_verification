@@ -258,6 +258,24 @@ input::placeholder { color: var(--theme-text-muted); }
 
 .step-labels { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
 .step-label { font-size: .7rem; padding: 2px 8px; border-radius: 4px; background: var(--theme-panel-alt-bg); color: var(--theme-text-muted); border: 1px solid var(--theme-border-color); }
+.control-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+.control-card {
+  background: var(--theme-panel-alt-bg);
+  border: 1px solid var(--theme-border-color);
+  border-radius: var(--radius);
+  padding: 14px;
+  backdrop-filter: blur(var(--theme-backdrop-blur-panel-alt));
+}
+.control-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.control-card-title { font-size: .95rem; font-weight: 600; }
+.control-card .btn-row { margin-top: 10px; }
+.control-card .btn { padding: 8px 14px; font-size: .82rem; }
 
 .status-msg { font-size: .85rem; padding: 4px 0; color: var(--theme-text-muted); }
 .status-msg.ok { color: var(--pass); }
@@ -273,6 +291,24 @@ input::placeholder { color: var(--theme-text-muted); }
 .tab-bar button:hover { color: var(--theme-text-primary); }
 .tab-pane { display: none; }
 .tab-pane.active { display: block; }
+
+/* ── Page navigation ── */
+.page-nav { display: flex; gap: 4px; margin-bottom: 24px; border-bottom: 2px solid var(--theme-border-color); }
+.page-nav-btn { background: none; border: none; color: var(--theme-text-muted); padding: 10px 22px;
+  font-size: .95rem; font-weight: 600; cursor: pointer; border-bottom: 3px solid transparent;
+  margin-bottom: -2px; transition: all .2s; }
+.page-nav-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+.page-nav-btn:hover { color: var(--theme-text-primary); }
+
+/* ── WS consistency view ── */
+.field-grid-ws { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.ws-progress-bar-bg { height: 8px; background: var(--theme-border-color); border-radius: 4px; margin-bottom: 10px; overflow: hidden; }
+.ws-progress-bar-fill { height: 100%; background: var(--accent); border-radius: 4px; width: 0%; transition: width .4s; }
+.ws-result-summary { margin-bottom: 12px; font-size: .85rem; color: var(--theme-text-muted); }
+#wsResultTable td, #wsResultTable th { white-space: nowrap; }
+.match-ok  { color: var(--pass); }
+.match-ng  { color: var(--fail); }
+.match-na  { color: var(--skip); }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 </head>
@@ -286,6 +322,12 @@ input::placeholder { color: var(--theme-text-muted); }
     </div>
   </header>
 
+  <nav class="page-nav">
+    <button class="page-nav-btn active" id="navBtnRts" onclick="switchPage('rts')">RTS 점검</button>
+    <button class="page-nav-btn" id="navBtnWs" onclick="switchPage('ws')">WS 정합성 검증</button>
+  </nav>
+
+  <div id="pageRts">
   <!-- ────── 1. REPO 설정 ────── -->
   <div class="card" id="repoCard">
     <h2><span class="num">1</span> REPO 설정</h2>
@@ -399,6 +441,11 @@ input::placeholder { color: var(--theme-text-muted); }
         <input id="sshPort" type="number" value="10022">
       </div>
     </div>
+    <div class="btn-row" style="margin-top:14px">
+      <button class="btn btn-secondary" id="btnDiscover" disabled>Service Discover</button>
+      <span id="discoverStatus" class="hidden"></span>
+    </div>
+    <div id="discoverResult" class="repo-info hidden" style="margin-top:12px"></div>
   </div>
 
   <!-- ────── 3. Target 점검 / Repo 점검 ────── -->
@@ -424,7 +471,6 @@ input::placeholder { color: var(--theme-text-muted); }
       <span class="step-label">3. PID 교차검증</span>
       <span class="step-label">4. ERROR grep</span>
       <span class="step-label">5. 비정상 종료 시그널</span>
-      <span class="step-label" id="stepLabelStopVerify" style="color:var(--warn)">6. rtsctl stop 검증</span>
     </div>
     <div class="status-msg" style="color:var(--text2);margin:8px 0 6px">Repo 점검 항목 (SQL)</div>
     <div class="step-labels">
@@ -436,12 +482,132 @@ input::placeholder { color: var(--theme-text-muted); }
       <span class="step-label">6. ORA_SQL_STAT_10MIN 대상 SQL 수집 확인</span>
     </div>
     <div class="btn-row" style="margin-top:12px">
-      <button class="btn btn-primary" id="btnRun" disabled>Target 점검 실행 (SSH)</button>
+      <button class="btn btn-primary" id="btnRun" disabled>Target 조회 점검 실행 (Read Only)</button>
       <span id="runStatus" class="hidden"></span>
     </div>
   </div>
 
   <!-- ────── 4. 두번째 Repo 설정 ────── -->
+  <div class="card" id="processControlCard">
+    <h2><span class="num">C</span> Process Control</h2>
+    <div class="status-msg" style="color:var(--text2);margin-bottom:10px">
+      Start/Stop 작업은 프로세스별 제어 계정으로 수행합니다. Discover 단계 계정과 값이 같아도 직접 입력한 제어 계정이면 사용할 수 있습니다.
+    </div>
+    <div id="processControlTargetInfo" class="repo-info" style="margin-bottom:10px">
+      <span class="badge badge-disconnected">NO TARGET</span>
+      <span>Step 2에서 Target DB를 선택해주세요</span>
+    </div>
+    <div class="control-grid">
+      <div class="control-card">
+        <div class="control-card-head">
+          <span class="control-card-title">Oracle DB</span>
+          <span class="badge badge-disconnected" id="controlBadgeOracle">IDLE</span>
+        </div>
+        <div class="status-msg">Target SID: <b id="controlOracleSid">-</b></div>
+        <div class="form-grid">
+          <div>
+            <label>Oracle Control User *</label>
+            <input id="ctrlOracleUser" type="text" placeholder="oracle">
+          </div>
+          <div>
+            <label>Oracle Control Password *</label>
+            <input id="ctrlOraclePass" type="password" placeholder="password">
+          </div>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-secondary control-action-btn" data-target="oracle_db" data-action="start" disabled>Start</button>
+          <button class="btn btn-secondary control-action-btn" data-target="oracle_db" data-action="stop" disabled>Stop</button>
+        </div>
+      </div>
+      <div class="control-card">
+        <div class="control-card-head">
+          <span class="control-card-title">RTS</span>
+          <span class="badge badge-disconnected" id="controlBadgeRts">IDLE</span>
+        </div>
+        <div class="status-msg">MaxGauge daemon control</div>
+        <div class="form-grid">
+          <div>
+            <label>RTS Control User *</label>
+            <input id="ctrlRtsUser" type="text" placeholder="maxgauge">
+          </div>
+          <div>
+            <label>RTS Control Password *</label>
+            <input id="ctrlRtsPass" type="password" placeholder="password">
+          </div>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-secondary control-action-btn" data-target="rts" data-action="start" disabled>Start</button>
+          <button class="btn btn-secondary control-action-btn" data-target="rts" data-action="stop" disabled>Stop</button>
+        </div>
+      </div>
+      <div class="control-card">
+        <div class="control-card-head">
+          <span class="control-card-title">SNDF</span>
+          <span class="badge badge-disconnected" id="controlBadgeSndf">IDLE</span>
+        </div>
+        <div class="status-msg">MaxGauge daemon control</div>
+        <div class="form-grid">
+          <div>
+            <label>SNDF Control User *</label>
+            <input id="ctrlSndfUser" type="text" placeholder="maxgauge">
+          </div>
+          <div>
+            <label>SNDF Control Password *</label>
+            <input id="ctrlSndfPass" type="password" placeholder="password">
+          </div>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-secondary control-action-btn" data-target="sndf" data-action="start" disabled>Start</button>
+          <button class="btn btn-secondary control-action-btn" data-target="sndf" data-action="stop" disabled>Stop</button>
+        </div>
+      </div>
+      <div class="control-card">
+        <div class="control-card-head">
+          <span class="control-card-title">OBSD</span>
+          <span class="badge badge-disconnected" id="controlBadgeObsd">IDLE</span>
+        </div>
+        <div class="status-msg">MaxGauge daemon control</div>
+        <div class="form-grid">
+          <div>
+            <label>OBSD Control User *</label>
+            <input id="ctrlObsdUser" type="text" placeholder="maxgauge">
+          </div>
+          <div>
+            <label>OBSD Control Password *</label>
+            <input id="ctrlObsdPass" type="password" placeholder="password">
+          </div>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-secondary control-action-btn" data-target="obsd" data-action="start" disabled>Start</button>
+          <button class="btn btn-secondary control-action-btn" data-target="obsd" data-action="stop" disabled>Stop</button>
+        </div>
+      </div>
+      <div class="control-card">
+        <div class="control-card-head">
+          <span class="control-card-title">Updater</span>
+          <span class="badge badge-disconnected" id="controlBadgeUpdater">IDLE</span>
+        </div>
+        <div class="status-msg">MaxGauge updater control</div>
+        <div class="form-grid">
+          <div>
+            <label>Updater Control User *</label>
+            <input id="ctrlUpdaterUser" type="text" placeholder="maxgauge">
+          </div>
+          <div>
+            <label>Updater Control Password *</label>
+            <input id="ctrlUpdaterPass" type="password" placeholder="password">
+          </div>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-secondary control-action-btn" data-target="updater" data-action="start" disabled>Start</button>
+          <button class="btn btn-secondary control-action-btn" data-target="updater" data-action="stop" disabled>Stop</button>
+        </div>
+      </div>
+    </div>
+    <div id="controlStatus" class="status-msg hidden" style="margin-top:12px"></div>
+    <div id="controlResult" class="hidden" style="margin-top:12px"></div>
+  </div>
+
   <div class="card" id="polRepoCard">
     <h2><span class="num">4</span> 두번째 Repo 설정 <small style="font-size:.75rem;font-weight:400;color:var(--text2)">(선택 사항 — 신규 Repo 점검에서 POL_RTS 컬럼에 사용됩니다)</small></h2>
     <div id="polRepoStatus">
@@ -571,7 +737,100 @@ input::placeholder { color: var(--theme-text-muted); }
       <div id="resultContent"></div>
     </div>
   </div>
-</div>
+  </div><!-- /#pageRts -->
+
+  <!-- ════════════════════════════════════════════════════════
+       WS 정합성 검증 뷰
+       ════════════════════════════════════════════════════════ -->
+  <div id="pageWs" style="display:none">
+
+    <!-- 카드 A: 설정 입력 -->
+    <div class="card">
+      <h2>WS 정합성 검증 설정</h2>
+
+      <!-- Repo DB 선택 -->
+      <div style="margin-bottom:12px">
+        <label style="font-size:.85rem;color:var(--theme-text-muted);display:block;margin-bottom:6px">Repo DB 선택 (MongoDB 목록)</label>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <select id="wsRepoSelect" style="flex:1;min-width:220px;background:var(--theme-input-bg);border:1px solid var(--theme-input-border);color:var(--theme-text-primary);padding:7px 10px;border-radius:var(--radius);font-size:.85rem">
+            <option value="">— Repo DB를 선택하세요 —</option>
+          </select>
+          <button class="btn" id="btnWsLoadMongo" onclick="wsLoadMongoList()" style="font-size:.82rem;padding:6px 14px">목록 새로고침</button>
+        </div>
+        <div id="wsRepoSelectedInfo" style="margin-top:6px;font-size:.8rem;color:var(--theme-text-muted)"></div>
+      </div>
+
+      <div class="field-grid-ws">
+        <div class="field">
+          <label>MaxGauge 기본 URL</label>
+          <input id="wsMgUrl" type="text" value="http://10.10.47.72:19190/MAXGAUGE" placeholder="http://...">
+        </div>
+        <div class="field">
+          <label>아이디 *</label>
+          <input id="wsMgUser" type="text" placeholder="MaxGauge 로그인 아이디">
+        </div>
+        <div class="field">
+          <label>비밀번호 *</label>
+          <input id="wsMgPassword" type="password" placeholder="MaxGauge 로그인 비밀번호">
+        </div>
+        <div class="field">
+          <label>비교 주기 (초)</label>
+          <input id="wsIntervalSeconds" type="number" value="1" min="1" max="300">
+        </div>
+      </div>
+      <div class="field" style="margin-top:10px">
+        <label>모니터링 화면 URL <span style="font-weight:400;color:var(--theme-text-muted)">(선택 — 로그인 후 세션 현황이 보이는 화면의 전체 URL)</span></label>
+        <input id="wsMgMonitorUrl" type="text" placeholder="예: http://10.10.47.72:19190/MAXGAUGE/  (비우면 자동 탐색)">
+      </div>
+
+      <div class="status-msg" style="color:var(--theme-text-muted);margin-top:8px;font-size:.8rem">
+        ※ Playwright(headless Chrome)로 MaxGauge에 로그인하고 WS 메시지를 실시간 수신합니다.<br>
+        ※ 비교 주기마다 Target Oracle DB에 접속하여 v$session 값과 비교합니다. "중지" 버튼으로 종료합니다.
+      </div>
+
+      <div style="display:flex;align-items:center;gap:14px;margin-top:14px">
+        <button class="btn btn-primary" id="btnRunWsConsistency">실시간 검증 시작</button>
+        <button class="btn" id="btnStopWsConsistency" style="display:none;background:var(--fail);color:#fff">중지</button>
+        <span id="wsRunStatus" style="font-size:.85rem;display:none"></span>
+      </div>
+    </div>
+
+    <!-- 카드 B: 진행 상황 -->
+    <div class="card" id="wsProgressCard" style="display:none">
+      <h2>진행 상황</h2>
+      <div class="ws-progress-bar-bg">
+        <div class="ws-progress-bar-fill" id="wsProgressFill"></div>
+      </div>
+      <div id="wsProgressText" style="font-size:.85rem;color:var(--theme-text-muted)">대기 중...</div>
+    </div>
+
+    <!-- 카드 C: 검증 결과 -->
+    <div class="card" id="wsResultCard" style="display:none">
+      <div style="display:flex;align-items:baseline;gap:16px;flex-wrap:wrap">
+        <h2 style="margin:0">검증 결과</h2>
+        <span id="wsLastUpdated" style="font-size:.82rem;color:var(--theme-text-muted)"></span>
+        <span id="wsIterationBadge" style="font-size:.82rem;color:var(--accent)"></span>
+      </div>
+      <div class="ws-result-summary" id="wsResultSummary"></div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Instance</th><th>DB_ID</th>
+              <th>active(DB)</th><th>active(WS)</th><th>M</th>
+              <th>total(DB)</th><th>total(WS)</th><th>M</th>
+              <th>lock(DB)</th><th>lock(WS)</th><th>M</th>
+              <th>일치여부</th>
+            </tr>
+          </thead>
+          <tbody id="wsResultTable"></tbody>
+        </table>
+      </div>
+    </div>
+
+  </div><!-- /#pageWs -->
+
+</div><!-- /.container -->
 
 <script>
 const API_RTS = '/api/v2/rts/check';
@@ -659,6 +918,13 @@ function _stopRepoQueryCountdown() {
 }
 
 const $ = id => document.getElementById(id);
+const CONTROL_TARGET_META = {
+  oracle_db: { userId: 'ctrlOracleUser', passId: 'ctrlOraclePass', badgeId: 'controlBadgeOracle', label: 'Oracle DB' },
+  rts: { userId: 'ctrlRtsUser', passId: 'ctrlRtsPass', badgeId: 'controlBadgeRts', label: 'RTS' },
+  sndf: { userId: 'ctrlSndfUser', passId: 'ctrlSndfPass', badgeId: 'controlBadgeSndf', label: 'SNDF' },
+  obsd: { userId: 'ctrlObsdUser', passId: 'ctrlObsdPass', badgeId: 'controlBadgeObsd', label: 'OBSD' },
+  updater: { userId: 'ctrlUpdaterUser', passId: 'ctrlUpdaterPass', badgeId: 'controlBadgeUpdater', label: 'Updater' },
+};
 
 /** 두번째 Repo 엔진에 따라 카드5 필드 표시/숨김 */
 function syncPolCard5Fields(engine) {
@@ -1183,12 +1449,231 @@ function selectRow(tr) {
   `;
   $('targetPassword').value = '';
   $('btnRun').disabled = false;
+  if ($('btnDiscover')) $('btnDiscover').disabled = false;
   $('btnCpuMemSnapshot').disabled = false;
   $('btnCpuMemWindow').disabled = false;
   $('btnCpuMemStartPoll').disabled = false;
+  updateProcessControlTargetInfo();
+  setProcessControlButtonsDisabled(false);
+}
+
+function setProcessControlButtonsDisabled(disabled) {
+  document.querySelectorAll('.control-action-btn').forEach(btn => {
+    btn.disabled = !!disabled;
+  });
+}
+
+function updateProcessControlTargetInfo() {
+  const info = $('processControlTargetInfo');
+  const sidEl = $('controlOracleSid');
+  if (!info || !sidEl) return;
+  if (!selectedRow) {
+    info.innerHTML = '<span class="badge badge-disconnected">NO TARGET</span><span>Step 2에서 Target DB를 선택해주세요</span>';
+    sidEl.textContent = '-';
+    return;
+  }
+  sidEl.textContent = selectedRow.sid || '-';
+  info.innerHTML = `
+    <span class="badge badge-connected">CONTROL READY</span>
+    <span>db_id: <span class="val">${selectedRow.db_id}</span></span>
+    <span>host: <span class="val">${escHtml(selectedRow.host_ip || '-')}</span></span>
+    <span>sid: <span class="val">${escHtml(selectedRow.sid || '-')}</span></span>
+    <span>instance: <span class="val">${escHtml(selectedRow.instance_name || '-')}</span></span>
+  `;
+}
+
+function renderDiscoverResult(data) {
+  const wrap = $('discoverResult');
+  if (!wrap) return;
+  const services = Array.isArray(data.services) ? data.services : [];
+  if (!services.length) {
+    wrap.classList.remove('hidden');
+    wrap.innerHTML = '<span class="badge badge-disconnected">NO DATA</span><span>No discovered services</span>';
+    return;
+  }
+  const rows = services.map(s => `
+    <tr>
+      <td>${escHtml(s.label || s.service_key || '-')}</td>
+      <td>${s.presence_detected ? '<span class="badge badge-connected">VISIBLE</span>' : '<span class="badge badge-disconnected">HIDDEN</span>'}</td>
+      <td>${escHtml(s.runtime_status || '-')}</td>
+      <td>${escHtml(s.final_reason || '-')}</td>
+    </tr>
+  `).join('');
+  wrap.classList.remove('hidden');
+  wrap.innerHTML = `
+    <div class="result-header" style="margin-bottom:10px">
+      <span class="host">Service Discover</span>
+      ${badge(data.overall_status || 'error')}
+      <span class="meta">${escHtml(data.host_ip || '-')} / ${escHtml(data.os_type || '-')}</span>
+    </div>
+    <div class="table-wrap" style="max-height:260px">
+      <table>
+        <thead><tr><th>Service</th><th>Presence</th><th>Runtime</th><th>Reason</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+async function runServiceDiscover() {
+  if (!selectedRow) throw new Error('Step 2?먯꽌 Target DB瑜?癒쇱? ?좏깮?댁＜?몄슂.');
+  const sshUser = $('sshUser').value.trim();
+  const sshPassword = $('sshPassword').value;
+  if (!sshUser || !sshPassword) {
+    throw new Error('Step 2??SSH User/Password瑜??낅젰?댁＜?몄슂.');
+  }
+
+  const btn = $('btnDiscover');
+  const st = $('discoverStatus');
+  st.classList.remove('hidden');
+  st.style.color = 'var(--text2)';
+  st.innerHTML = '<span class="spinner"></span> Discover 以?..';
+  btn.disabled = true;
+
+  try {
+    const body = {
+      db_id: selectedRow.db_id,
+      host_ip: selectedRow.host_ip,
+      ssh_user: sshUser,
+      ssh_password: sshPassword,
+      ssh_port: parseInt($('sshPort').value) || 22,
+      conf_name: selectedRow.instance_name || undefined,
+      target_services: ['rts', 'datagather', 'platformjs'],
+    };
+    const res = await fetch(`${API_RTS}/discover`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Discover failed');
+    renderDiscoverResult(data);
+    st.style.color = 'var(--pass)';
+    st.textContent = `Discover complete (${(data.services || []).length} services)`;
+  } catch (e) {
+    $('discoverResult').classList.add('hidden');
+    $('discoverResult').innerHTML = '';
+    st.style.color = 'var(--fail)';
+    st.textContent = e.message || String(e);
+  } finally {
+    btn.disabled = !selectedRow;
+  }
+}
+
+function buildControlCredentialsPayload() {
+  const payload = {};
+  const commonPort = parseInt(($('sshPort') && $('sshPort').value) || 22) || 22;
+  Object.entries(CONTROL_TARGET_META).forEach(([target, meta]) => {
+    payload[target] = {
+      user: $(meta.userId).value.trim(),
+      password: $(meta.passId).value,
+      port: commonPort,
+    };
+  });
+  return payload;
+}
+
+function setControlBadge(target, statusText, styleKind) {
+  const meta = CONTROL_TARGET_META[target];
+  if (!meta) return;
+  const el = $(meta.badgeId);
+  if (!el) return;
+  el.textContent = statusText;
+  el.className = 'badge ' + (
+    styleKind === 'pass' ? 'badge-connected' :
+    styleKind === 'fail' ? 'badge-fail' :
+    styleKind === 'running' ? 'badge-skip' :
+    'badge-disconnected'
+  );
+}
+
+function renderControlResult(data) {
+  const wrap = $('controlResult');
+  wrap.classList.remove('hidden');
+  const steps = Array.isArray(data.steps) ? data.steps : [];
+  const html = steps.map(s => `
+    <div class="step-card">
+      <div class="step-head">
+        <span class="step-name">${escHtml(s.step || '-')}</span>
+        ${badge(s.status || 'error')}
+      </div>
+      <div class="evidence">${escHtml(s.evidence || '')}</div>
+    </div>
+  `).join('');
+  wrap.innerHTML = `
+    <div class="result-header">
+      <span class="host">${escHtml((data.target || '-').toUpperCase())} ${escHtml((data.action || '').toUpperCase())}</span>
+      ${badge(data.overall_status || 'error')}
+      <span class="meta">${escHtml(data.control_user || '-')} @ ${escHtml(data.host_ip || '-')}</span>
+    </div>
+    ${data.error ? `<div class="step-card"><div class="evidence">${escHtml(data.error)}</div></div>` : ''}
+    ${html}
+  `;
+}
+
+async function runProcessControl(target, action, triggerBtn) {
+  if (!selectedRow) throw new Error('Step 2에서 Target DB를 먼저 선택해주세요.');
+  const meta = CONTROL_TARGET_META[target];
+  if (!meta) throw new Error(`Unsupported target: ${target}`);
+  const user = $(meta.userId).value.trim();
+  const password = $(meta.passId).value;
+  if (!user || !password) {
+    throw new Error(`${meta.label} 제어 계정(user/password)을 입력해주세요.`);
+  }
+
+  const statusEl = $('controlStatus');
+  statusEl.classList.remove('hidden');
+  statusEl.style.color = 'var(--text2)';
+  statusEl.innerHTML = `<span class="spinner"></span> ${meta.label} ${action} 실행 중...`;
+  $('controlResult').classList.add('hidden');
+  $('controlResult').innerHTML = '';
+  setControlBadge(target, 'RUNNING', 'running');
+  setProcessControlButtonsDisabled(true);
+  if (triggerBtn) triggerBtn.disabled = true;
+
+  try {
+    const body = {
+      db_id: selectedRow.db_id,
+      action,
+      target,
+      control_credentials: buildControlCredentialsPayload(),
+      ssh_user: $('sshUser').value.trim(),
+      ssh_password: $('sshPassword').value,
+      conf_name: selectedRow.instance_name || undefined,
+    };
+    const res = await fetch(`${API_RTS}/control`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(json.error || `${meta.label} ${action} failed`);
+    statusEl.classList.add('hidden');
+    renderControlResult(json);
+    setControlBadge(target, json.overall_status === 'pass' ? action.toUpperCase() : 'FAIL', json.overall_status === 'pass' ? 'pass' : 'fail');
+  } catch (e) {
+    statusEl.classList.remove('hidden');
+    statusEl.style.color = 'var(--fail)';
+    statusEl.textContent = e.message;
+    setControlBadge(target, 'FAIL', 'fail');
+  } finally {
+    setProcessControlButtonsDisabled(!selectedRow);
+  }
 }
 
 // ─── Run Check ─────────────────────────────
+document.querySelectorAll('.control-action-btn').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    await runProcessControl(btn.dataset.target, btn.dataset.action, btn);
+  });
+});
+
+if ($('btnDiscover')) {
+  $('btnDiscover').onclick = async () => {
+    await runServiceDiscover();
+  };
+}
+
 $('btnRun').onclick = async () => {
   if (!selectedRow) return;
   const btn = $('btnRun');
@@ -1205,7 +1690,7 @@ $('btnRun').onclick = async () => {
     ssh_password: $('sshPassword').value,
     ssh_port: parseInt($('sshPort').value) || 22,
     on_failure: 'run_all',
-    verify_stop: true,
+    verify_stop: false,
   };
 
   if (!body.ssh_user || !body.ssh_password) {
@@ -1891,17 +2376,24 @@ function escHtml(s) {
 function resetTargetDbArea() {
   selectedRow = null;
   $('btnRun').disabled = true;
+  if ($('btnDiscover')) $('btnDiscover').disabled = true;
   $('btnCpuMemSnapshot').disabled = true;
   $('btnCpuMemWindow').disabled = true;
   $('btnCpuMemStartPoll').disabled = true;
+  setProcessControlButtonsDisabled(true);
   $('targetPassword').value = '';
   $('targetSelectedInfo').innerHTML = '<span class="badge badge-disconnected">NO TARGET</span><span>Step 2에서 Target DB를 선택해주세요</span>';
   $('dbTable').innerHTML = '<tr><td colspan="8" class="empty">Repo DB 연결 후 목록을 조회하세요</td></tr>';
   $('dbTable2').innerHTML = '<tr><td colspan="8" class="empty">Step 4에서 두번째 Repo를 설정 후 조회하세요</td></tr>';
+  if ($('discoverStatus')) $('discoverStatus').classList.add('hidden');
+  if ($('discoverResult')) { $('discoverResult').classList.add('hidden'); $('discoverResult').innerHTML = ''; }
   if ($('secondTargetSelectedInfo')) $('secondTargetSelectedInfo').innerHTML = '<span class="badge badge-disconnected">미선택</span><span>아래 목록에서 Target을 선택하세요</span>';
   selectedRow2 = null;
   _dbRows = [];
   $('dbStatus').classList.add('hidden');
+  if ($('processControlTargetInfo')) $('processControlTargetInfo').innerHTML = '<span class="badge badge-disconnected">NO TARGET</span><span>Step 2에서 Target DB를 선택해주세요</span>';
+  if ($('controlOracleSid')) $('controlOracleSid').textContent = '-';
+  Object.keys(CONTROL_TARGET_META).forEach(target => setControlBadge(target, 'IDLE', 'idle'));
 }
 
 function resetResultArea() {
@@ -1909,6 +2401,8 @@ function resetResultArea() {
   $('resultContent').innerHTML = '';
   $('runStatus').classList.add('hidden');
   $('runStatus').textContent = '';
+  if ($('controlStatus')) { $('controlStatus').classList.add('hidden'); $('controlStatus').textContent = ''; }
+  if ($('controlResult')) { $('controlResult').classList.add('hidden'); $('controlResult').innerHTML = ''; }
   $('cpuMemResult').classList.add('hidden');
   $('cpuMemResult').innerHTML = '';
   $('cpuMemStatus').classList.add('hidden');
@@ -2547,6 +3041,234 @@ resetResultArea();
 initThemeToggle();
 syncRepoStep5FieldsForEngine('');
 loadRepoStatus();
+
+// ═══════════════════════════════════════════════════════════════
+// WS 정합성 검증
+// ═══════════════════════════════════════════════════════════════
+
+// ── 페이지 전환 ──────────────────────────────────────────────────
+function switchPage(page) {
+  document.getElementById('pageRts').style.display = page === 'rts' ? '' : 'none';
+  document.getElementById('pageWs').style.display  = page === 'ws'  ? '' : 'none';
+  document.getElementById('navBtnRts').classList.toggle('active', page === 'rts');
+  document.getElementById('navBtnWs').classList.toggle('active',  page === 'ws');
+  if (page === 'ws' && !_wsMongoLoaded) wsLoadMongoList();
+}
+
+// ── Repo DB MongoDB 목록 로드 ────────────────────────────────────
+let _wsMongoLoaded = false;
+let _wsMongoList = [];
+
+async function wsLoadMongoList() {
+  try {
+    const resp = await fetch(`${API_MONGO}/db_list`);
+    if (!resp.ok) throw new Error(await resp.text());
+    const data = await resp.json();
+    _wsMongoList = Array.isArray(data) ? data : (data.data || []);
+    const sel = document.getElementById('wsRepoSelect');
+    sel.innerHTML = '<option value="">— Repo DB를 선택하세요 —</option>';
+    _wsMongoList.forEach(r => {
+      const opt = document.createElement('option');
+      opt.value = r.id || '';
+      const port = r.db_port || r.port || '';
+      const label = r.description || r.name || r.host || '';
+      opt.textContent = `${label}  ${r.host}:${port}  [${r.db_type || ''}]`;
+      sel.appendChild(opt);
+    });
+    _wsMongoLoaded = true;
+  } catch (e) {
+    console.error('wsLoadMongoList 실패:', e);
+  }
+}
+
+document.getElementById('wsRepoSelect').addEventListener('change', function() {
+  const id = this.value;
+  const row = _wsMongoList.find(r => r.id === id);
+  const info = document.getElementById('wsRepoSelectedInfo');
+  if (row) {
+    const port = row.db_port || row.port || '-';
+    info.textContent = `${row.host}:${port}  DB: ${row.database || row.service || '-'}  Type: ${row.db_type || '-'}`;
+  } else {
+    info.textContent = '';
+  }
+});
+
+// ── 실행 및 폴링 ─────────────────────────────────────────────────
+let _wsJobId   = null;
+let _wsPoller  = null;
+
+document.getElementById('btnRunWsConsistency').addEventListener('click', async () => {
+  const config_id        = document.getElementById('wsRepoSelect').value.trim();
+  const mg_url           = document.getElementById('wsMgUrl').value.trim();
+  const mg_user          = document.getElementById('wsMgUser').value.trim();
+  const mg_password      = document.getElementById('wsMgPassword').value;
+  const interval_seconds = parseInt(document.getElementById('wsIntervalSeconds').value) || 30;
+  const monitor_url      = document.getElementById('wsMgMonitorUrl').value.trim();
+
+  if (!config_id)   { alert('Repo DB를 선택하세요.'); return; }
+  if (!mg_user)     { alert('MaxGauge 아이디를 입력하세요.'); return; }
+  if (!mg_password) { alert('MaxGauge 비밀번호를 입력하세요.'); return; }
+
+  if (_wsPoller) { clearInterval(_wsPoller); _wsPoller = null; }
+  document.getElementById('wsProgressCard').style.display      = '';
+  document.getElementById('wsProgressFill').style.width        = '0%';
+  document.getElementById('wsProgressText').textContent        = '시작 중...';
+  document.getElementById('btnRunWsConsistency').style.display = 'none';
+  document.getElementById('btnStopWsConsistency').style.display = '';
+  const statusEl = document.getElementById('wsRunStatus');
+  statusEl.style.display = '';
+  statusEl.style.color   = 'var(--theme-text-muted)';
+  statusEl.textContent   = '실행 중...';
+
+  try {
+    const resp = await fetch(`${API_RTS}/ws-consistency/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ config_id, mg_url, mg_user, mg_password, interval_seconds, monitor_url }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      statusEl.style.color = 'var(--fail)';
+      statusEl.textContent = data.error || '실행 실패';
+      _wsResetButtons();
+      return;
+    }
+    _wsJobId  = data.job_id;
+    _wsPoller = setInterval(_pollWsJob, 2000);
+  } catch (e) {
+    statusEl.style.color = 'var(--fail)';
+    statusEl.textContent = '요청 실패: ' + e.message;
+    _wsResetButtons();
+  }
+});
+
+document.getElementById('btnStopWsConsistency').addEventListener('click', async () => {
+  if (!_wsJobId) return;
+  try {
+    await fetch(`${API_RTS}/ws-consistency/stop/${_wsJobId}`, { method: 'POST' });
+  } catch (e) {}
+  const statusEl = document.getElementById('wsRunStatus');
+  statusEl.style.color = 'var(--theme-text-muted)';
+  statusEl.textContent = '중지 요청 중...';
+});
+
+function _wsResetButtons() {
+  document.getElementById('btnRunWsConsistency').style.display  = '';
+  document.getElementById('btnStopWsConsistency').style.display = 'none';
+}
+
+async function _pollWsJob() {
+  if (!_wsJobId) return;
+  try {
+    const resp = await fetch(`${API_RTS}/ws-consistency/result/${_wsJobId}`);
+    const job  = await resp.json();
+    const pct  = job.progress_pct || 0;
+
+    document.getElementById('wsProgressFill').style.width = pct + '%';
+    document.getElementById('wsProgressText').textContent =
+      `[${job.completed_steps}/${job.total_steps}] ${job.current_step || ''}  (${pct}%)`;
+
+    // 결과가 있으면 바로 갱신 (running 상태여도)
+    if (job.result) {
+      _renderWsResult(job.result);
+    }
+
+    if (job.status === 'stopped') {
+      clearInterval(_wsPoller); _wsPoller = null;
+      _wsResetButtons();
+      const statusEl = document.getElementById('wsRunStatus');
+      statusEl.style.color = 'var(--theme-text-muted)';
+      statusEl.textContent = '중지됨';
+    } else if (job.status === 'error') {
+      clearInterval(_wsPoller); _wsPoller = null;
+      _wsResetButtons();
+      const statusEl = document.getElementById('wsRunStatus');
+      statusEl.style.color = 'var(--fail)';
+      statusEl.textContent = '오류: ' + (job.error || '알 수 없는 오류');
+    }
+  } catch (e) {
+    console.error('폴링 오류:', e);
+  }
+}
+
+// ── 결과 렌더링 ──────────────────────────────────────────────────
+function _renderWsResult(result) {
+  if (!result) return;
+  const card = document.getElementById('wsResultCard');
+  card.style.display = '';
+
+  // 갱신 시각 / 회차 표시
+  if (result.last_updated) {
+    const t = new Date(result.last_updated * 1000);
+    document.getElementById('wsLastUpdated').textContent =
+      `마지막 갱신: ${t.toLocaleTimeString()}`;
+  }
+  if (result.iteration) {
+    document.getElementById('wsIterationBadge').textContent =
+      `${result.iteration}회차 (${result.interval_seconds}초 주기)`;
+  }
+
+  // 에러 케이스: 서비스가 오류 메시지와 빈 report 반환한 경우
+  if (result.error) {
+    document.getElementById('wsResultSummary').innerHTML =
+      `<span class="match-ng">오류: ${escHtml(result.error)}</span>`;
+    document.getElementById('wsResultTable').innerHTML =
+      `<tr><td colspan="12" class="empty">${escHtml(result.error)}</td></tr>`;
+    return;
+  }
+
+  // 요약
+  let summaryHtml =
+    `총 <b>${result.total_instances ?? '-'}</b>개 인스턴스 &nbsp;|&nbsp; ` +
+    `WS 수신: <b>${result.ws_received_count ?? '-'}</b> &nbsp;|&nbsp; ` +
+    `<span class="match-ok">일치: ${result.match_count ?? '-'}</span> &nbsp;|&nbsp; ` +
+    `<span class="match-ng">불일치: ${result.mismatch_count ?? '-'}</span> &nbsp;|&nbsp; ` +
+    `<span class="match-na">N/A: ${result.na_count ?? '-'}</span> &nbsp;|&nbsp; ` +
+    `소요: ${result.duration_seconds ?? '-'}초`;
+  if (result.db_error_sample) {
+    summaryHtml += `<br><span class="match-ng" style="font-size:.8rem">⚠ DB 접속 오류 샘플: ${escHtml(result.db_error_sample)}</span>`;
+  }
+  if ((result.ws_received_count ?? 0) === 0) {
+    summaryHtml += `<br><span class="match-na" style="font-size:.8rem">⚠ WS 메시지 미수신 — MaxGauge 모니터링 화면 URL을 직접 입력하면 개선될 수 있습니다.</span>`;
+  }
+  document.getElementById('wsResultSummary').innerHTML = summaryHtml;
+
+  const tbody = document.getElementById('wsResultTable');
+  tbody.innerHTML = '';
+
+  const _matchBadge = (m) => {
+    if (m === '일치')   return '<span class="match-ok">✅</span>';
+    if (m === '불일치') return '<span class="match-ng">❌</span>';
+    return '<span class="match-na">-</span>';
+  };
+
+  const _overallBadge = (overall) => {
+    if (overall === '일치')   return '<span class="badge badge-pass" style="background:rgba(74,222,128,.15);color:var(--pass);border:1px solid var(--theme-success-border);padding:2px 8px;border-radius:4px">✅ 일치</span>';
+    if (overall === '불일치') return '<span class="badge badge-fail" style="background:rgba(248,113,113,.15);color:var(--fail);border:1px solid var(--theme-error-border);padding:2px 8px;border-radius:4px">❌ 불일치</span>';
+    return '<span style="color:var(--skip);font-size:.8rem">N/A</span>';
+  };
+
+  const _val = (v) => (v === null || v === undefined) ? '<span style="color:var(--skip)">-</span>' : escHtml(String(v));
+
+  (result.report || []).forEach(row => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${escHtml(row.instance_name || '-')}</td>
+      <td style="text-align:center">${row.db_id}</td>
+      <td style="text-align:center">${_val(row.active_db)}</td>
+      <td style="text-align:center">${_val(row.active_ws)}</td>
+      <td style="text-align:center">${_matchBadge(row.match_active)}</td>
+      <td style="text-align:center">${_val(row.total_db)}</td>
+      <td style="text-align:center">${_val(row.total_ws)}</td>
+      <td style="text-align:center">${_matchBadge(row.match_total)}</td>
+      <td style="text-align:center">${_val(row.lock_db)}</td>
+      <td style="text-align:center">${_val(row.lock_ws)}</td>
+      <td style="text-align:center">${_matchBadge(row.match_lock)}</td>
+      <td style="text-align:center">${_overallBadge(row.overall)}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
 </script>
 </body>
 </html>

@@ -17,6 +17,26 @@ SSH_CONNECT_TIMEOUT = 10
 CMD_TIMEOUT = 15
 
 DAEMONS = ["rts", "sndf", "obsd", "updater"]
+CONTROL_TARGETS = ["oracle_db"] + DAEMONS
+DISCOVERY_SERVICES = ["rts", "datagather", "platformjs"]
+
+SERVICE_DISCOVERY_RULES: Dict[str, Dict[str, Any]] = {
+    "rts": {
+        "label": "RTS",
+        "presence_suffix": "/bin/mxg_rts",
+        "runtime_regex": "mxg_rts|rtsmon|(^|[[:space:]/])rts($|[[:space:]])",
+    },
+    "datagather": {
+        "label": "DataGather",
+        "presence_suffix": "/bin/dgsctl",
+        "runtime_regex": "dgsctl|DGServer|DataGather",
+    },
+    "platformjs": {
+        "label": "PlatformJS",
+        "presence_suffix": "/pjsctl",
+        "runtime_regex": "pjsctl|platformjs|PlatformJS",
+    },
+}
 
 _SENSITIVE_PATTERNS = re.compile(
     r"(password|passwd|pwd|secret|token)[=:\s]+\S+", re.IGNORECASE
@@ -106,6 +126,54 @@ def _shell_quote(s: str) -> str:
     return "'" + str(s).replace("'", "'\"'\"'") + "'"
 
 
+def _ordered_unique(items: List[str]) -> List[str]:
+    out: List[str] = []
+    seen = set()
+    for item in items:
+        val = str(item or "").strip()
+        if not val or val in seen:
+            continue
+        seen.add(val)
+        out.append(val)
+    return out
+
+
+def _make_discovery_result(service_key: str) -> Dict[str, Any]:
+    label = SERVICE_DISCOVERY_RULES.get(service_key, {}).get("label", service_key)
+    return {
+        "service_key": service_key,
+        "label": label,
+        "presence_detected": False,
+        "runtime_status": "NOT_FOUND",
+        "evidence": [],
+        "strategy_attempts": [],
+        "final_reason": "",
+    }
+
+
+def _add_strategy_attempt(
+    result: Dict[str, Any],
+    stage: str,
+    strategy: str,
+    success: bool,
+    detail: str,
+) -> None:
+    result["strategy_attempts"].append(
+        {
+            "stage": stage,
+            "strategy": strategy,
+            "success": bool(success),
+            "detail": _mask_sensitive(_truncate(detail, 2000)),
+        }
+    )
+
+
+def _append_evidence(result: Dict[str, Any], text: str) -> None:
+    cleaned = _mask_sensitive(_truncate(str(text or ""), 2000))
+    if cleaned:
+        result["evidence"].append(cleaned)
+
+
 # ────────────────────────────────────────────────────────
 # OS 감지 및 OS별 명령어 헬퍼
 # ────────────────────────────────────────────────────────
@@ -154,6 +222,152 @@ def _find_in_root(root: str, name: str, os_type: str, depth: int = 8) -> str:
         return f"test -d {rq} && find {rq} -maxdepth {depth} -name {nq} 2>/dev/null | head -5"
     else:
         return f"test -d {rq} && find {rq} -name {nq} 2>/dev/null | head -5"
+
+
+def _discovery_search_roots(ssh_user: str, base_dir: Optional[str]) -> List[str]:
+    roots = [
+        base_dir or "",
+        f"/home/{ssh_user}",
+        "/home/maxgauge",
+        "/home/oracle",
+        "/home",
+        "/data",
+        "/data1",
+        "/data2",
+        "/data3",
+        "/data4",
+        "/data5",
+        "/opt",
+        "/app",
+        "/srv",
+        "/usr/local",
+    ]
+    return _ordered_unique(roots)
+
+
+def _build_presence_scan_cmd(roots: List[str], suffix: str, os_type: str) -> str:
+    suffix_q = _shell_quote(f"{suffix}$")
+    parts: List[str] = []
+    for root in roots:
+        rq = _shell_quote(root)
+        if os_type == "aix":
+            find_cmd = f"find {rq} -follow -maxdepth 10 -type f 2>/dev/null"
+        elif os_type in ("linux", "unknown"):
+            find_cmd = f"find {rq} -maxdepth 10 -type f 2>/dev/null"
+        else:
+            find_cmd = f"find {rq} -type f 2>/dev/null"
+        parts.append(
+            f"if test -d {rq}; then {find_cmd} | grep -E {suffix_q} || true; fi"
+        )
+    return "( " + " ; ".join(parts) + " ) | head -20"
+
+
+def _presence_parent_base(path: str) -> Optional[str]:
+    val = str(path or "").strip().replace("\\", "/")
+    if not val:
+        return None
+    if val.endswith("/bin/mxg_rts") or val.endswith("/bin/dgsctl"):
+        return val.rsplit("/bin/", 1)[0]
+    if val.endswith("/pjsctl"):
+        return val.rsplit("/pjsctl", 1)[0].rstrip("/")
+    return None
+
+
+def _scan_service_presence(
+    ssh: "_SSHSession",
+    service_key: str,
+    roots: List[str],
+    os_type: str,
+) -> Dict[str, Any]:
+    rule = SERVICE_DISCOVERY_RULES[service_key]
+    result = _make_discovery_result(service_key)
+    cmd = _build_presence_scan_cmd(roots, rule["presence_suffix"], os_type)
+    out, err, rc = ssh.run(cmd, timeout=40)
+    lines = [line.strip() for line in out.splitlines() if line.strip()]
+    result["presence_detected"] = bool(lines)
+    if lines:
+        _append_evidence(result, f"presence paths: {', '.join(lines[:5])}")
+        _add_strategy_attempt(
+            result,
+            "presence_check",
+            f"find control file {rule['presence_suffix']}",
+            True,
+            "\n".join(lines[:10]),
+        )
+        result["runtime_status"] = "STOPPED"
+        result["final_reason"] = f"control file found: {lines[0]}"
+    else:
+        _add_strategy_attempt(
+            result,
+            "presence_check",
+            f"find control file {rule['presence_suffix']}",
+            False,
+            (out + "\n" + err).strip() or f"exit_code={rc}",
+        )
+        result["final_reason"] = f"control file {rule['presence_suffix']} not found"
+    result["presence_paths"] = lines
+    result["detected_base_dir"] = _presence_parent_base(lines[0]) if lines else None
+    return result
+
+
+def _scan_service_runtime(
+    ssh: "_SSHSession",
+    service_key: str,
+    result: Dict[str, Any],
+) -> None:
+    rule = SERVICE_DISCOVERY_RULES[service_key]
+    regex_q = _shell_quote(rule["runtime_regex"])
+    cmd = (
+        f"ps -ef 2>/dev/null | grep -E {regex_q} | grep -v grep | head -20 || true"
+    )
+    out, err, rc = ssh.run(cmd, timeout=15)
+    lines = [line.strip() for line in out.splitlines() if line.strip()]
+    is_running = bool(lines)
+    _add_strategy_attempt(
+        result,
+        "runtime_check",
+        f"ps -ef grep {rule['runtime_regex']}",
+        is_running,
+        "\n".join(lines[:10]) if lines else ((out + "\n" + err).strip() or f"exit_code={rc}"),
+    )
+    if lines:
+        result["runtime_status"] = "RUNNING"
+        _append_evidence(result, f"runtime ps: {lines[0]}")
+        result["final_reason"] = f"process matched runtime pattern: {rule['runtime_regex']}"
+    elif result.get("presence_detected"):
+        result["runtime_status"] = "STOPPED"
+    else:
+        result["runtime_status"] = "NOT_FOUND"
+
+
+def discover_services_with_ssh(
+    ssh: "_SSHSession",
+    ssh_user: str,
+    os_type: str,
+    base_dir: Optional[str] = None,
+    target_services: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    requested = target_services or DISCOVERY_SERVICES
+    service_keys = [s for s in requested if s in SERVICE_DISCOVERY_RULES]
+    roots = _discovery_search_roots(ssh_user, base_dir)
+    results: List[Dict[str, Any]] = []
+    for service_key in service_keys:
+        try:
+            service_result = _scan_service_presence(ssh, service_key, roots, os_type)
+            _scan_service_runtime(ssh, service_key, service_result)
+        except Exception as e:
+            service_result = _make_discovery_result(service_key)
+            service_result["runtime_status"] = "UNKNOWN"
+            service_result["final_reason"] = f"discover failed: {_mask_sensitive(str(e))}"
+            _add_strategy_attempt(
+                service_result,
+                "discover",
+                "exception",
+                False,
+                str(e),
+            )
+        results.append(service_result)
+    return {"search_roots": roots, "services": results}
 
 
 # ────────────────────────────────────────────────────────
@@ -1020,6 +1234,238 @@ def get_apm_db_row(db_id: int) -> Tuple[bool, Optional[Dict[str, Any]], str]:
         release_connection("repo", conn)
 
 
+def _normalize_discovery_services(target_services: Optional[List[str]]) -> List[str]:
+    if not target_services:
+        return list(DISCOVERY_SERVICES)
+    normalized: List[str] = []
+    for item in target_services:
+        key = str(item or "").strip().lower()
+        if key in SERVICE_DISCOVERY_RULES and key not in normalized:
+            normalized.append(key)
+    return normalized or list(DISCOVERY_SERVICES)
+
+
+def run_service_discovery(
+    ssh_user: str,
+    ssh_password: str,
+    ssh_port: int = 22,
+    db_id: Optional[int] = None,
+    host_ip: Optional[str] = None,
+    conf_name: Optional[str] = None,
+    base_dir: Optional[str] = None,
+    host_override: Optional[str] = None,
+    target_services: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    total_t0 = time.time()
+    db_row: Optional[Dict[str, Any]] = None
+
+    if db_id is not None:
+        ok, db_row, err_msg = get_apm_db_row(int(db_id))
+        if not ok:
+            return {"error": err_msg, "services": [], "overall_status": "error"}
+
+    resolved_host = host_override or host_ip or (db_row or {}).get("host_ip")
+    resolved_conf = conf_name or (db_row or {}).get("instance_name")
+    if not resolved_host:
+        return {"error": "host_ip or db_id is required", "services": [], "overall_status": "error"}
+
+    result: Dict[str, Any] = {
+        "db_id": db_id,
+        "host_ip": resolved_host,
+        "conf_name": resolved_conf,
+        "overall_status": "pass",
+        "services": [],
+    }
+
+    try:
+        ssh = _SSHSession(resolved_host, ssh_port, ssh_user, ssh_password)
+    except Exception as e:
+        result["overall_status"] = "error"
+        result["error"] = f"SSH connection failed: {_mask_sensitive(str(e))}"
+        result["total_duration_ms"] = _elapsed_ms(total_t0)
+        return result
+
+    try:
+        detected_os = _detect_os(ssh)
+        discover_data = discover_services_with_ssh(
+            ssh=ssh,
+            ssh_user=ssh_user,
+            os_type=detected_os,
+            base_dir=base_dir,
+            target_services=_normalize_discovery_services(target_services),
+        )
+        result["os_type"] = detected_os
+        result["search_roots"] = discover_data["search_roots"]
+        result["services"] = discover_data["services"]
+    finally:
+        ssh.close()
+
+    result["total_duration_ms"] = _elapsed_ms(total_t0)
+    return result
+
+
+def _normalize_control_target(target: str) -> str:
+    value = str(target or "").strip().lower()
+    if value not in CONTROL_TARGETS:
+        raise ValueError(f"unsupported control target: {target}")
+    return value
+
+
+def _extract_daemon_state(stat_text: str, daemon: str) -> str:
+    block_match = re.search(rf"(?is)\b{re.escape(daemon)}\b[^;\n]*", stat_text or "")
+    block = block_match.group(0) if block_match else ""
+    block_low = block.lower()
+    if "does not exist" in block_low:
+        return "DOES_NOT_EXIST"
+    if "not running" in block_low or "stopped" in block_low:
+        return "STOPPED"
+    if "running" in block_low:
+        return "RUNNING"
+    return block.strip() if block.strip() else "UNKNOWN"
+
+
+def _oracle_sid_export(sid: str) -> str:
+    return f"export ORACLE_SID={_shell_quote(sid)}"
+
+
+def _oracle_control_cmd(action: str) -> str:
+    sql = "shutdown immediate;" if action == "stop" else "startup;"
+    return f"printf '%s\\n%s\\n' { _shell_quote(sql) } 'exit;' | sqlplus -s / as sysdba 2>&1"
+
+
+def _run_oracle_control(
+    ssh: _SSHSession,
+    action: str,
+    sid: str,
+) -> Dict[str, Any]:
+    t0 = time.time()
+    sid = str(sid or "").strip()
+    if not sid:
+        return _step_result("oracle_db_control", "fail", "Target SID is required for oracle_db control", _elapsed_ms(t0))
+
+    cmd = f"{_oracle_sid_export(sid)} && {_oracle_control_cmd(action)}"
+    out, err, rc = ssh.run(cmd, timeout=60)
+    combined = (out + "\n" + err).strip()
+    pmon_out, _, _ = ssh.run(
+        f"ps -ef 2>/dev/null | grep -i pmon | grep -i { _shell_quote(sid) } | grep -v grep || true",
+        timeout=10,
+    )
+    has_pmon = bool(pmon_out.strip())
+    if rc != 0 or "ORA-" in combined:
+        status = "fail"
+    elif action == "start":
+        status = "pass" if has_pmon else "fail"
+    else:
+        status = "pass" if not has_pmon else "fail"
+
+    evidence = (
+        f"[command rc={rc}] {combined[:1200]}\n"
+        f"[pmon check] {'RUNNING' if has_pmon else 'STOPPED'}\n"
+        f"{pmon_out[:600]}"
+    )
+    return _step_result("oracle_db_control", status, evidence, _elapsed_ms(t0))
+
+
+def _run_daemon_control(
+    ssh: _SSHSession,
+    conf_dir: str,
+    target: str,
+    action: str,
+) -> Dict[str, Any]:
+    t0 = time.time()
+    prefix = _mxgrc_prefix(conf_dir)
+    if target == "updater":
+        cmd = f"{prefix} && rtsctl {'start_updater' if action == 'start' else 'stop_updater'} 2>&1"
+    else:
+        cmd = f"{prefix} && rtsctl {action} {target} 2>&1"
+
+    out, err, rc = ssh.run(cmd, timeout=45)
+    combined = (out + "\n" + err).strip()
+    stat_out, stat_err, _ = ssh.run(f"{prefix} && rtsctl stat 2>&1", timeout=20)
+    stat_combined = (stat_out + "\n" + stat_err).strip()
+    daemon_state = _extract_daemon_state(stat_combined, target)
+    if rc != 0:
+        status = "fail"
+    elif action == "start":
+        status = "pass" if daemon_state == "RUNNING" else "fail"
+    else:
+        status = "pass" if daemon_state in ("STOPPED", "DOES_NOT_EXIST") else "fail"
+
+    evidence = (
+        f"[command rc={rc}] {combined[:1200]}\n"
+        f"[rtsctl stat] {target}={daemon_state}\n"
+        f"{stat_combined[:600]}"
+    )
+    return _step_result(f"{target}_control", status, evidence, _elapsed_ms(t0))
+
+
+def run_process_control(
+    db_id: int,
+    action: str,
+    target: str,
+    control_credentials: Dict[str, Dict[str, Any]],
+    conf_name: Optional[str] = None,
+    base_dir: Optional[str] = None,
+    host_override: Optional[str] = None,
+) -> Dict[str, Any]:
+    action = str(action or "").strip().lower()
+    if action not in ("start", "stop"):
+        raise ValueError("action must be 'start' or 'stop'")
+
+    target = _normalize_control_target(target)
+    creds = dict((control_credentials or {}).get(target) or {})
+    user = str(creds.get("user") or "").strip()
+    password = creds.get("password") or ""
+    if not user or not password:
+        raise ValueError(f"control credential for '{target}' is required")
+
+    port_raw = creds.get("port")
+    port = int(port_raw or 22)
+    ok, db_row, err_msg = get_apm_db_row(int(db_id))
+    if not ok or not db_row:
+        return {"overall_status": "error", "error": err_msg, "steps": []}
+
+    host_ip = host_override or db_row["host_ip"]
+    resolved_conf = conf_name or db_row["instance_name"]
+    result: Dict[str, Any] = {
+        "db_id": int(db_id),
+        "host_ip": host_ip,
+        "conf_name": resolved_conf,
+        "action": action,
+        "target": target,
+        "control_user": user,
+        "steps": [],
+        "overall_status": "pass",
+    }
+
+    ssh = _SSHSession(host_ip, port, user, password)
+    try:
+        if target == "oracle_db":
+            step = _run_oracle_control(ssh, action, str(db_row.get("sid") or ""))
+            result["steps"].append(step)
+            result["overall_status"] = "pass" if step["status"] == "pass" else "fail"
+            return result
+
+        detected_os = _detect_os(ssh)
+        result["os_type"] = detected_os
+        resolved_conf_dir, path_diag = _resolve_conf_dir(ssh, resolved_conf, base_dir, os_type=detected_os)
+        if resolved_conf_dir is None:
+            result["overall_status"] = "error"
+            result["error"] = (
+                f"MaxGauge install path not found (conf: {resolved_conf}, os: {detected_os}).\n"
+                f"diagnostics:\n{path_diag}"
+            )
+            return result
+
+        result["resolved_conf_dir"] = resolved_conf_dir
+        step = _run_daemon_control(ssh, resolved_conf_dir, target, action)
+        result["steps"].append(step)
+        result["overall_status"] = "pass" if step["status"] == "pass" else "fail"
+        return result
+    finally:
+        ssh.close()
+
+
 def run_rts_check(
     db_id: int,
     ssh_user: str,
@@ -1079,9 +1525,20 @@ def run_rts_check(
         # OS 타입 감지 (uname -s) — 이후 find/ps 명령어 분기에 사용
         detected_os = _detect_os(ssh)
         result["os_type"] = detected_os
+        discover_data = discover_services_with_ssh(
+            ssh=ssh,
+            ssh_user=ssh_user,
+            os_type=detected_os,
+            base_dir=base_dir,
+            target_services=["rts"],
+        )
+        result["discover_services"] = discover_data["services"]
+        result["discover_search_roots"] = discover_data["search_roots"]
+        rts_discovery = discover_data["services"][0] if discover_data["services"] else {}
+        discovered_base_dir = rts_discovery.get("detected_base_dir")
 
         resolved_conf_dir, path_diag = _resolve_conf_dir(
-            ssh, resolved_conf, base_dir, os_type=detected_os
+            ssh, resolved_conf, base_dir or discovered_base_dir, os_type=detected_os
         )
         if resolved_conf_dir is None:
             result["overall_status"] = "error"

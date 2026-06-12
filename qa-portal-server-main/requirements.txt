@@ -26,3 +26,4 @@ requests==2.32.5
 beautifulsoup4==4.12.3
 psycopg2-binary==2.9.9
 pywinrm
+playwright>=1.40.0
