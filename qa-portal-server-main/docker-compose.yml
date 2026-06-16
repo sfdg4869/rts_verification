@@ -1,17 +1,16 @@
 services:
   web:
-    build: .
-    image: qa-portal-server:local
+    image: ${QA_PORTAL_IMAGE:?Set QA_PORTAL_IMAGE in .env or the shell before deploy}
+    pull_policy: always
+    container_name: qa-portal-server
     ports:
-      - "5000:5000"
+      - "${APP_PORT:-5000}:5000"
     env_file:
       - .env
     environment:
-      # MongoDB 등 없이 로컬 JSON만 쓸 때는 비워도 됨
       MONGODB_URI: ${MONGODB_URI:-}
     volumes:
-      # 컨테이너 밖에서 DB 프로필·설정 유지 (없으면 주석 처리)
-      - ./db_setup.json:/app/db_setup.json
-      - ./db_config.json:/app/db_config.json
+      - ./db_setup.json:/app/db_setup.json:ro
+      - ./db_config.json:/app/db_config.json:ro
       - ./app/resource:/app/app/resource
     restart: unless-stopped

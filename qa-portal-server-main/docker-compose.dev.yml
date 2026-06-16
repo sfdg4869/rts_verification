@@ -1,0 +1,19 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: qa-portal-server:dev
+    container_name: qa-portal-server-dev
+    ports:
+      - "${APP_PORT:-5000}:5000"
+    env_file:
+      - .env
+    environment:
+      FLASK_ENV: development
+      FLASK_DEBUG: "1"
+      MONGODB_URI: ${MONGODB_URI:-}
+    volumes:
+      - .:/app
+    command: python app.py
+    restart: unless-stopped
