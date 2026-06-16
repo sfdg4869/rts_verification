@@ -1,0 +1,179 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: Run remote deploy after the image is pushed
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: qa-portal-server-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PROJECT_DIR: qa-portal-server-main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      image_ref: ${{ steps.meta.outputs.image_ref }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Validate registry secrets
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+        run: |
+          for key in GHCR_USERNAME GHCR_TOKEN; do
+            if [[ -z "${!key}" ]]; then
+              echo "Missing required secret: ${key}" >&2
+              exit 1
+            fi
+          done
+
+      - name: Compute image tags
+        id: meta
+        shell: bash
+        run: |
+          OWNER_LOWER="${GITHUB_REPOSITORY_OWNER,,}"
+          IMAGE_NAME="ghcr.io/${OWNER_LOWER}/qa-portal-server"
+          SHORT_SHA="${GITHUB_SHA::12}"
+          echo "image_ref=${IMAGE_NAME}:sha-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "latest_ref=${IMAGE_NAME}:latest" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ secrets.GHCR_USERNAME }}
+          password: ${{ secrets.GHCR_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./qa-portal-server-main
+          file: ./qa-portal-server-main/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.image_ref }}
+            ${{ steps.meta.outputs.latest_ref }}
+
+  deploy:
+    if: github.event_name == 'workflow_dispatch' && inputs.deploy
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate deploy secrets
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PASSWORD: ${{ secrets.DEPLOY_PASSWORD }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+        run: |
+          for key in DEPLOY_HOST DEPLOY_PASSWORD DEPLOY_PATH DEPLOY_USER GHCR_USERNAME GHCR_TOKEN; do
+            if [[ -z "${!key}" ]]; then
+              echo "Missing required secret: ${key}" >&2
+              exit 1
+            fi
+          done
+          if [[ -z "${DEPLOY_PORT}" ]]; then
+            echo "DEPLOY_PORT is empty. Defaulting to 22."
+          fi
+
+      - name: Install SSH tools
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y sshpass
+
+      - name: Configure known_hosts
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+        run: |
+          PORT="${DEPLOY_PORT:-22}"
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -p "${PORT}" -H "${DEPLOY_HOST}" >> ~/.ssh/known_hosts
+
+      - name: Deploy on remote host
+        shell: bash
+        env:
+          APP_PORT_SECRET: ${{ secrets.APP_PORT }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PASSWORD: ${{ secrets.DEPLOY_PASSWORD }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          IMAGE_REF: ${{ needs.build.outputs.image_ref }}
+          TARGET_REF: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          PORT="${DEPLOY_PORT:-22}"
+          APP_PORT_B64="$(printf '%s' "${APP_PORT_SECRET:-}" | base64 -w0)"
+          DEPLOY_PATH_B64="$(printf '%s' "${DEPLOY_PATH}" | base64 -w0)"
+          GHCR_TOKEN_B64="$(printf '%s' "${GHCR_TOKEN}" | base64 -w0)"
+          GHCR_USERNAME_B64="$(printf '%s' "${GHCR_USERNAME}" | base64 -w0)"
+          IMAGE_REF_B64="$(printf '%s' "${IMAGE_REF}" | base64 -w0)"
+          TARGET_REF_B64="$(printf '%s' "${TARGET_REF}" | base64 -w0)"
+
+          sshpass -p "${DEPLOY_PASSWORD}" ssh -p "${PORT}" "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "APP_PORT_B64='${APP_PORT_B64}' DEPLOY_PATH_B64='${DEPLOY_PATH_B64}' GHCR_TOKEN_B64='${GHCR_TOKEN_B64}' GHCR_USERNAME_B64='${GHCR_USERNAME_B64}' IMAGE_REF_B64='${IMAGE_REF_B64}' TARGET_REF_B64='${TARGET_REF_B64}' bash -s" <<'EOF'
+          set -euo pipefail
+
+          decode_b64() {
+            printf '%s' "$1" | base64 -d
+          }
+
+          APP_PORT_SECRET="$(decode_b64 "${APP_PORT_B64}")"
+          DEPLOY_PATH="$(decode_b64 "${DEPLOY_PATH_B64}")"
+          GHCR_TOKEN="$(decode_b64 "${GHCR_TOKEN_B64}")"
+          GHCR_USERNAME="$(decode_b64 "${GHCR_USERNAME_B64}")"
+          IMAGE_REF="$(decode_b64 "${IMAGE_REF_B64}")"
+          TARGET_REF="$(decode_b64 "${TARGET_REF_B64}")"
+
+          cd "${DEPLOY_PATH}"
+          git fetch --all --prune
+          git checkout "${TARGET_REF}"
+          git pull --ff-only origin "${TARGET_REF}"
+
+          if [[ -f "./deploy.sh" && -f "./docker-compose.yml" ]]; then
+            PROJECT_PATH="$(pwd)"
+          elif [[ -f "./qa-portal-server-main/deploy.sh" && -f "./qa-portal-server-main/docker-compose.yml" ]]; then
+            PROJECT_PATH="$(pwd)/qa-portal-server-main"
+          else
+            echo "Could not find deploy.sh under ${DEPLOY_PATH}" >&2
+            exit 1
+          fi
+
+          cd "${PROJECT_PATH}"
+          printf '%s' "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
+          if [[ -n "${APP_PORT_SECRET}" ]]; then
+            APP_PORT="${APP_PORT_SECRET}" QA_PORTAL_IMAGE="${IMAGE_REF}" bash ./deploy.sh
+          else
+            QA_PORTAL_IMAGE="${IMAGE_REF}" bash ./deploy.sh
+          fi
+EOF
