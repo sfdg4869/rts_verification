@@ -9,11 +9,11 @@
     "database": "oracle19"
   },
   "repo": {
-    "host": "10.10.47.72",
+    "host": "10.10.47.100",
     "port": 1521,
-    "user": "REPO_25FINAL2",
-    "password": "REPO_25FINAL2",
-    "database": "T_REPO_25FINAL2",
+    "user": "SS_REPO_2407",
+    "password": "SS_REPO_2407",
+    "database": "TS_SS_REPO_2407",
     "service": "ORA11204",
     "service_type": "sid",
     "db_type": "oracle"

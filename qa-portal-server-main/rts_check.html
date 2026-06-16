@@ -1951,7 +1951,11 @@ if (false && $('btnRunRepoNew')) $('btnRunRepoNew').onclick = async () => {
       const polSchemaVal = ($('polRepoSchemaName')?.value || '').trim();
       const polDbIdVal = ($('polRepoDbIdList')?.value || '').trim();
       if (polSchemaVal) body.pol_repo_schema_name = polSchemaVal;
-      if (polDbIdVal) body.pol_repo_db_id_list = polDbIdVal;
+      if (polDbIdVal) {
+        body.pol_repo_db_id_list = polDbIdVal;
+      } else if (selectedRow2?.db_id) {
+        body.pol_repo_db_id_list = String(selectedRow2.db_id);
+      }
     }
 
     const res = await fetch(`${API_RTS}/run-repo-new-job`, {
@@ -2112,7 +2116,11 @@ $('btnRunRepoStep5').onclick = async () => {
       const polSchemaVal = ($('polRepoSchemaName')?.value || '').trim();
       const polDbIdVal   = ($('polRepoDbIdList')?.value  || '').trim();
       if (polSchemaVal) body.pol_repo_schema_name = polSchemaVal;
-      if (polDbIdVal)   body.pol_repo_db_id_list  = polDbIdVal;
+      if (polDbIdVal) {
+        body.pol_repo_db_id_list = polDbIdVal;
+      } else if (selectedRow2?.db_id) {
+        body.pol_repo_db_id_list = String(selectedRow2.db_id);
+      }
     }
     const res = await fetch(`${API_RTS}/run-repo-step5-job`, {
       method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)
@@ -2282,7 +2290,7 @@ function renderNewRepoResultGrid(json) {
   });
   const inferMetaFromTarget = (sid) => {
     const r = targetRowById[String(sid || '').toLowerCase()];
-    const txt = String((r && r.sql_text) || '').toUpperCase();
+    const txt = String((r && (r.sql_text || r.sql_fulltext)) || '').toUpperCase();
     if (!txt) return null;
     if (txt.includes('BEGIN QS_SQL_TEST_PROC1')) {
       return { case: "Case 1", proc: "qs_sql_test_proc1 호출 (3s)", label: "프로시저 호출 쿼리" };

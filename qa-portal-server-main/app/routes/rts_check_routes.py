@@ -365,6 +365,7 @@ def set_repo_from_mongodb():
         "service": doc.get("service", doc.get("database", "")),
         "service_type": stype,
         "db_type": doc.get("db_type", "oracle"),
+        "schema_name": (doc.get("schema_name") or "").strip(),
     }
 
     set_db_config("repo", repo_cfg)
@@ -387,6 +388,7 @@ def set_repo_from_mongodb():
             "database": repo_cfg["database"],
             "user": repo_cfg["user"],
             "db_type": repo_cfg["db_type"],
+            "schema_name": repo_cfg.get("schema_name", ""),
         },
     }), 200
 
@@ -1008,6 +1010,7 @@ def run_repo_steps14_job_api():
 def run_repo_step5_job_api():
     """Step5+6 독립 실행: Repo DB ORA_SQL_ELAPSE/ORA_SQL_STAT_10MIN 조회 + SYS 정리"""
     from app.services.new_repo_check_service import run_step5_repo_only
+    from app.services.target_sql_test_service import _get_apm_db_row_with_secret
 
     data = request.get_json(silent=True) or {}
     db_id = data.get("db_id")
@@ -1035,6 +1038,24 @@ def run_repo_step5_job_api():
 
     def _worker():
         try:
+            provided_target_cfg = target_cfg or {}
+            provided_password = provided_target_cfg.get("password")
+            resolved_target_cfg = None
+
+            ok, row, err = _get_apm_db_row_with_secret(int(db_id))
+            if not ok or not row:
+                raise RuntimeError(err)
+
+            resolved_target_cfg = {
+                "db_id": row["db_id"],
+                "host": row["host_ip"],
+                "port": row["lsnr_port"],
+                "user": row["db_user"],
+                "password": provided_password or row["db_password"],
+                "sid": row["sid"],
+                "instance_name": row["instance_name"],
+            }
+
             def _progress(done: int, total: int, step_name: str, step_status: str):
                 with _REPO_JOB_LOCK:
                     job = _REPO_JOBS.get(job_id)
@@ -1054,7 +1075,7 @@ def run_repo_step5_job_api():
                 pol_repo_config_id=pol_repo_config_id,
                 pol_repo_schema_name=pol_repo_schema_name,
                 pol_repo_db_id_list=pol_repo_db_id_list,
-                target_config=target_cfg,
+                target_config=resolved_target_cfg,
                 sys_password=sys_password,
                 progress_callback=_progress,
             )
