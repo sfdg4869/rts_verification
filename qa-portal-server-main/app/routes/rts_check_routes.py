@@ -10,18 +10,61 @@ import time
 import uuid
 import os
 import json
+import tempfile
 
 bp = Blueprint("rts_check", __name__, url_prefix="/api/v2/rts/check")
 _REPO_JOB_LOCK = threading.Lock()
 _REPO_JOBS = {}
-_REPO_JOB_STORE_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(__file__)),
-    "resource",
-    "repo_jobs_state.json",
-)
+def _repo_job_store_candidates():
+    env_path = (os.getenv("REPO_JOB_STORE_PATH") or "").strip()
+    default_path = os.path.join(
+        os.path.dirname(os.path.dirname(__file__)),
+        "resource",
+        "repo_jobs_state.json",
+    )
+    tmp_path = os.path.join(tempfile.gettempdir(), "qa_portal_repo_jobs_state.json")
+
+    candidates = []
+    for path in (env_path, default_path, tmp_path):
+        if path and path not in candidates:
+            candidates.append(path)
+    return candidates
+
+
+def _can_write_repo_job_store(path: str) -> bool:
+    try:
+        parent = os.path.dirname(path) or "."
+        os.makedirs(parent, exist_ok=True)
+        probe = path + ".writecheck"
+        with open(probe, "w", encoding="utf-8") as f:
+            f.write("")
+        os.remove(probe)
+        return True
+    except OSError:
+        return False
+
+
+def _resolve_repo_job_store_path() -> str:
+    candidates = _repo_job_store_candidates()
+    default_path = candidates[0]
+    for candidate in candidates:
+        if _can_write_repo_job_store(candidate):
+            if candidate != default_path:
+                print(f"[WARNING] Repo job store path fallback: {default_path} -> {candidate}")
+            return candidate
+    print(f"[WARNING] Repo job store is not writable. Keeping default path: {default_path}")
+    return default_path
+
+
+_REPO_JOB_STORE_PATH = _resolve_repo_job_store_path()
 
 
 def _persist_repo_jobs() -> None:
+    global _REPO_JOB_STORE_PATH
+
+    if not _can_write_repo_job_store(_REPO_JOB_STORE_PATH):
+        _REPO_JOB_STORE_PATH = _resolve_repo_job_store_path()
+
     os.makedirs(os.path.dirname(_REPO_JOB_STORE_PATH), exist_ok=True)
     tmp = _REPO_JOB_STORE_PATH + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
@@ -365,6 +408,7 @@ def set_repo_from_mongodb():
         "service": doc.get("service", doc.get("database", "")),
         "service_type": stype,
         "db_type": doc.get("db_type", "oracle"),
+        "schema_name": (doc.get("schema_name") or "").strip(),
     }
 
     set_db_config("repo", repo_cfg)
@@ -982,9 +1026,6 @@ def run_repo_new_job_api():
                 pol_repo_config_id=pol_repo_config_id,
                 pol_repo_schema_name=pol_repo_schema_name,
                 pol_repo_db_id_list=pol_repo_db_id_list,
-                ssh_user=ssh_user,
-                ssh_password=ssh_password,
-                ssh_port=ssh_port,
             )
             with _REPO_JOB_LOCK:
                 job = _REPO_JOBS.get(job_id)
