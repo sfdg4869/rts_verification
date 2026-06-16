@@ -64,7 +64,7 @@ Add these repository secrets before running the deploy workflow:
 Notes:
 
 - `APP_PORT` is optional. If set, the workflow passes it to `deploy.sh` during deploy.
-- `DEPLOY_PATH` should be the repository path on the server.
+- `DEPLOY_PATH` can be either the repository root or the `qa-portal-server-main` directory on the server.
 - `DEPLOY_PASSWORD` is the SSH password for `DEPLOY_USER`.
 - `GHCR_TOKEN` should be a token that can push packages in GitHub Actions and pull packages on the target server.
 - The server checkout must be able to run `git pull origin <branch>`.
