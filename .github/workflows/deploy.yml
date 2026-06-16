@@ -176,4 +176,4 @@ jobs:
           else
             QA_PORTAL_IMAGE="${IMAGE_REF}" bash ./deploy.sh
           fi
-EOF
+          EOF
