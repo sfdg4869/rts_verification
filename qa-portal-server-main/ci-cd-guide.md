@@ -1,11 +1,16 @@
 # QA Portal Semi-Auto CI/CD
 
-This repository now uses two Docker Compose entry points:
+This repository now uses two main Docker Compose entry points:
 
 - `docker-compose.yml`
   Production deploy. Pulls a prebuilt image from a registry.
 - `docker-compose.dev.yml`
   Local development. Builds from the local `Dockerfile`.
+
+For old Oracle servers that require Thick mode, production deploy can also add:
+
+- `docker-compose.oracle-zip-build.yml`
+  Production-only override that switches the `web` service to a local Docker build with a staged Oracle Instant Client zip.
 
 ## 1. Local development
 
@@ -25,13 +30,15 @@ Clone this repository on the target server and prepare these files:
 Manual deploy from the server:
 
 ```bash
-QA_PORTAL_IMAGE=ghcr.io/OWNER_OR_ORG/qa-portal-server:latest bash ./deploy.sh
+bash ./deploy.sh
 ```
 
-You can also store `QA_PORTAL_IMAGE` in `.env` and run:
+`deploy.sh` loads values from `.env`, so keep `QA_PORTAL_IMAGE` there for normal image-pull deploys.
+
+If you prefer to override the image for one run:
 
 ```bash
-bash ./deploy.sh
+QA_PORTAL_IMAGE=ghcr.io/OWNER_OR_ORG/qa-portal-server:latest bash ./deploy.sh
 ```
 
 ## 3. GitHub Actions flow
@@ -69,7 +76,27 @@ Notes:
 - `GHCR_TOKEN` should be a token that can push packages in GitHub Actions and pull packages on the target server.
 - The server checkout must be able to run `git pull origin <branch>`.
 
-## 5. Recommended first run
+## 5. Oracle Thick mode for old Oracle servers
+
+If Oracle connections fail with `DPY-3010` in Docker, the app is running in thin mode and the target Oracle server is too old for thin mode.
+
+Prepare Oracle Instant Client on the server and set these values in `.env`:
+
+```bash
+ORACLE_CLIENT_ZIP_PATH=/home/maxgauge/oracle/instantclient-basic-linuxx64.zip
+ORACLE_CLIENT_LIB_DIR=/opt/oracle/instantclient
+```
+
+When `ORACLE_CLIENT_ZIP_PATH` is set, `deploy.sh` switches from registry pull mode to a local Docker build:
+
+1. It copies the server-local zip into the repo root as `instantclient.zip`.
+2. It adds `docker-compose.oracle-zip-build.yml`.
+3. It builds the `web` image with Oracle Instant Client bundled into the image.
+4. It removes the staged `instantclient.zip` after the deploy ends.
+
+Keep the zip file outside Git. The staged `instantclient.zip` is temporary and is ignored by Git.
+
+## 6. Recommended first run
 
 1. Push the CI/CD files to `main`.
 2. Run the `Build and Deploy` workflow with `workflow_dispatch`.

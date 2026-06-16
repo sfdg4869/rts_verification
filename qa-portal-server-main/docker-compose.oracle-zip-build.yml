@@ -1,0 +1,8 @@
+services:
+  web:
+    pull_policy: never
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        ORACLE_CLIENT_ARCHIVE: instantclient.zip

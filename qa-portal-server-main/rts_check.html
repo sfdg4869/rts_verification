@@ -489,7 +489,7 @@ input::placeholder { color: var(--theme-text-muted); }
   </div>
 
   <!-- ────── 4. 두번째 Repo 설정 ────── -->
-  <div class="card" id="processControlCard">
+  <div class="hidden" data-legacy-control="removed">
     <h2><span class="num">C</span> Process Control</h2>
     <div class="status-msg" style="color:var(--text2);margin-bottom:10px">
       Start/Stop 작업은 프로세스별 제어 계정으로 수행합니다. Discover 단계 계정과 값이 같아도 직접 입력한 제어 계정이면 사용할 수 있습니다.
@@ -516,8 +516,8 @@ input::placeholder { color: var(--theme-text-muted); }
           </div>
         </div>
         <div class="btn-row">
-          <button class="btn btn-secondary control-action-btn" data-target="oracle_db" data-action="start" disabled>Start</button>
-          <button class="btn btn-secondary control-action-btn" data-target="oracle_db" data-action="stop" disabled>Stop</button>
+          <button class="btn btn-secondary legacy-hidden-action-button" data-target="oracle_db" data-action="start" disabled>Start</button>
+          <button class="btn btn-secondary legacy-hidden-action-button" data-target="oracle_db" data-action="stop" disabled>Stop</button>
         </div>
       </div>
       <div class="control-card">
@@ -537,8 +537,8 @@ input::placeholder { color: var(--theme-text-muted); }
           </div>
         </div>
         <div class="btn-row">
-          <button class="btn btn-secondary control-action-btn" data-target="rts" data-action="start" disabled>Start</button>
-          <button class="btn btn-secondary control-action-btn" data-target="rts" data-action="stop" disabled>Stop</button>
+          <button class="btn btn-secondary legacy-hidden-action-button" data-target="rts" data-action="start" disabled>Start</button>
+          <button class="btn btn-secondary legacy-hidden-action-button" data-target="rts" data-action="stop" disabled>Stop</button>
         </div>
       </div>
       <div class="control-card">
@@ -558,8 +558,8 @@ input::placeholder { color: var(--theme-text-muted); }
           </div>
         </div>
         <div class="btn-row">
-          <button class="btn btn-secondary control-action-btn" data-target="sndf" data-action="start" disabled>Start</button>
-          <button class="btn btn-secondary control-action-btn" data-target="sndf" data-action="stop" disabled>Stop</button>
+          <button class="btn btn-secondary legacy-hidden-action-button" data-target="sndf" data-action="start" disabled>Start</button>
+          <button class="btn btn-secondary legacy-hidden-action-button" data-target="sndf" data-action="stop" disabled>Stop</button>
         </div>
       </div>
       <div class="control-card">
@@ -579,8 +579,8 @@ input::placeholder { color: var(--theme-text-muted); }
           </div>
         </div>
         <div class="btn-row">
-          <button class="btn btn-secondary control-action-btn" data-target="obsd" data-action="start" disabled>Start</button>
-          <button class="btn btn-secondary control-action-btn" data-target="obsd" data-action="stop" disabled>Stop</button>
+          <button class="btn btn-secondary legacy-hidden-action-button" data-target="obsd" data-action="start" disabled>Start</button>
+          <button class="btn btn-secondary legacy-hidden-action-button" data-target="obsd" data-action="stop" disabled>Stop</button>
         </div>
       </div>
       <div class="control-card">
@@ -600,8 +600,8 @@ input::placeholder { color: var(--theme-text-muted); }
           </div>
         </div>
         <div class="btn-row">
-          <button class="btn btn-secondary control-action-btn" data-target="updater" data-action="start" disabled>Start</button>
-          <button class="btn btn-secondary control-action-btn" data-target="updater" data-action="stop" disabled>Stop</button>
+          <button class="btn btn-secondary legacy-hidden-action-button" data-target="updater" data-action="start" disabled>Start</button>
+          <button class="btn btn-secondary legacy-hidden-action-button" data-target="updater" data-action="stop" disabled>Stop</button>
         </div>
       </div>
     </div>
@@ -843,6 +843,7 @@ let selectedRow = null;
 let selectedRow2 = null;  // 두번째 Target 선택
 let _dbRows = [];          // DB 목록 캐시 (두번째 테이블 재사용)
 let repoReady = false;
+let polRepoDbIdTouched = false;
 let selectedMongoId = null;
 let selectedPolRepoConfigId = null;   // POL Repo MongoDB config_id
 let polMongoList = [];                // 로드된 POL MongoDB 목록 캐시
@@ -922,7 +923,7 @@ function _stopRepoQueryCountdown() {
 }
 
 const $ = id => document.getElementById(id);
-const CONTROL_TARGET_META = {
+const LEGACY_CONTROL_META = {
   oracle_db: { userId: 'ctrlOracleUser', passId: 'ctrlOraclePass', badgeId: 'controlBadgeOracle', label: 'Oracle DB' },
   rts: { userId: 'ctrlRtsUser', passId: 'ctrlRtsPass', badgeId: 'controlBadgeRts', label: 'RTS' },
   sndf: { userId: 'ctrlSndfUser', passId: 'ctrlSndfPass', badgeId: 'controlBadgeSndf', label: 'SNDF' },
@@ -941,7 +942,7 @@ function syncPolCard5Fields(engine) {
   const pgWrap  = $('repoStep5PgWrap');
   const hint    = $('repoStep5BranchHint');
 
-  if (oraWrap) oraWrap.classList.toggle('hidden', !isOracle);
+  if (oraWrap) oraWrap.classList.toggle('hidden', !(isOracle || isPg));
   if (pgWrap)  pgWrap.classList.toggle('hidden',  !isPg);
   if (hint) {
     if (isOracle) {
@@ -957,6 +958,12 @@ function syncPolCard5Fields(engine) {
 function syncRepoStep5FieldsForEngine(engine) {
   // 첫번째 Repo 엔진을 변수로 저장 (Repo 신규 점검 전송 분기에 사용)
   repoStep5Engine = String(engine || '').toLowerCase();
+}
+
+if ($('polRepoDbIdList')) {
+  $('polRepoDbIdList').addEventListener('input', () => {
+    polRepoDbIdTouched = true;
+  });
 }
 
 function applyTheme(theme) {
@@ -1190,6 +1197,11 @@ $('btnApplyPolMongo').onclick = () => {
   const schemaName = $('btnApplyPolMongo').dataset.pendingSchema || '';
   if (!configId) return;
   selectedPolRepoConfigId = configId;
+  selectedRow2 = null;
+  polRepoDbIdTouched = false;
+  if ($('polRepoDbIdList')) $('polRepoDbIdList').value = '';
+  if ($('polRepoSchemaName')) $('polRepoSchemaName').value = '';
+  $('secondTargetSelectedInfo').innerHTML = '<span class="badge badge-disconnected">미선택</span><span>아래 목록에서 Target을 선택하세요</span>';
   // 카드5: 두번째 Repo 엔진에 따라 필드 표시 전환 + schema auto-fill
   syncPolCard5Fields(dbType);
   // Auto-fill schema into card5 input if available and field is empty
@@ -1220,6 +1232,7 @@ $('btnApplyPolMongo').onclick = () => {
 
 $('btnClearPolRepo').onclick = () => {
   selectedPolRepoConfigId = null;
+  polRepoDbIdTouched = false;
   polMongoList = [];
   $('polRepoStatus').innerHTML = `<div class="repo-info"><span class="badge badge-disconnected">미선택</span><span>POL Repo (PG)를 선택하면 신규 Repo 점검 실행 시 POL_RTS 값을 별도 조회합니다.</span></div>`;
   $('polMongoListWrap').classList.add('hidden');
@@ -1383,6 +1396,26 @@ function renderDbTable2(rows) {
   tbody.querySelectorAll('tr').forEach(tr => {
     tr.onclick = () => selectRow2(tr);
   });
+  const eng2 = String(_polRepoEngine || '').toLowerCase();
+  const isPg2 = eng2 === 'postgresql' || eng2 === 'postgres';
+  const targetInstance = String(selectedRow?.instance_name || '').trim().toLowerCase();
+  const targetDbId = selectedRow?.db_id ? String(selectedRow.db_id) : '';
+  let autoMatch = null;
+  if (isPg2 && targetInstance) {
+    autoMatch = Array.from(tbody.querySelectorAll('tr')).find(tr => String(tr.dataset.inst || '').trim().toLowerCase() === targetInstance);
+  } else if (targetDbId) {
+    autoMatch = Array.from(tbody.querySelectorAll('tr')).find(tr => String(tr.dataset.id || '') === targetDbId);
+  }
+  if (autoMatch) {
+    selectRow2(autoMatch);
+  } else if (isPg2 && rows.length && selectedRow) {
+    const knownTargets = rows.map(r => `${r.instance_name || '-'}(db_id:${r.db_id})`).join(', ');
+    $('secondTargetSelectedInfo').innerHTML = `
+      <span class="badge badge-disconnected">불일치</span>
+      <span>현재 Target instance <span class="val">${escHtml(selectedRow.instance_name || '-')}</span> 이 선택한 PG Repo 목록에 없습니다.</span>
+      <span>PG Repo 대상: <span class="val">${escHtml(knownTargets)}</span></span>
+    `;
+  }
 }
 
 function selectRow2(tr) {
@@ -1402,9 +1435,12 @@ function selectRow2(tr) {
   const isPg2 = eng2 === 'postgresql' || eng2 === 'postgres';
 
   // 두번째 Repo Oracle: db_id 자동 입력
-  if (isOracle2) {
+  if (isOracle2 || isPg2) {
     const inp = $('polRepoDbIdList');
-    if (inp) inp.value = String(selectedRow2.db_id);
+    if (inp) {
+      inp.value = String(selectedRow2.db_id);
+      polRepoDbIdTouched = false;
+    }
   }
   // 두번째 Repo PG: schema_name(instance_name) 자동 입력
   if (isPg2) {
@@ -1428,6 +1464,7 @@ function selectRow2(tr) {
     <span>instance: <span class="val">${escHtml(selectedRow2.instance_name || '-')}</span></span>
     <span>host: <span class="val">${escHtml(selectedRow2.host_ip || '-')}</span></span>
     ${isOracle2 ? `<span>→ POL db_id: <span class="val">${selectedRow2.db_id}</span></span>` : ''}
+    ${isPg2 ? `<span>→ POL db_id: <span class="val">${selectedRow2.db_id}</span></span>` : ''}
     ${isPg2 ? `<span>→ POL schema_name: <span class="val">${escHtml(selectedRow2.instance_name || '')}</span></span>` : ''}
   `;
 }
@@ -1457,17 +1494,15 @@ function selectRow(tr) {
   $('btnCpuMemSnapshot').disabled = false;
   $('btnCpuMemWindow').disabled = false;
   $('btnCpuMemStartPoll').disabled = false;
-  updateProcessControlTargetInfo();
-  setProcessControlButtonsDisabled(false);
 }
 
-function setProcessControlButtonsDisabled(disabled) {
-  document.querySelectorAll('.control-action-btn').forEach(btn => {
+function legacyToggleControlButtons(disabled) {
+  document.querySelectorAll('.legacy-hidden-action-button').forEach(btn => {
     btn.disabled = !!disabled;
   });
 }
 
-function updateProcessControlTargetInfo() {
+function legacySyncHiddenControlInfo() {
   const info = $('processControlTargetInfo');
   const sidEl = $('controlOracleSid');
   if (!info || !sidEl) return;
@@ -1564,10 +1599,10 @@ async function runServiceDiscover() {
   }
 }
 
-function buildControlCredentialsPayload() {
+function legacyControlPayload() {
   const payload = {};
   const commonPort = parseInt(($('sshPort') && $('sshPort').value) || 22) || 22;
-  Object.entries(CONTROL_TARGET_META).forEach(([target, meta]) => {
+  Object.entries(LEGACY_CONTROL_META).forEach(([target, meta]) => {
     payload[target] = {
       user: $(meta.userId).value.trim(),
       password: $(meta.passId).value,
@@ -1577,8 +1612,8 @@ function buildControlCredentialsPayload() {
   return payload;
 }
 
-function setControlBadge(target, statusText, styleKind) {
-  const meta = CONTROL_TARGET_META[target];
+function legacyApplyControlBadge(target, statusText, styleKind) {
+  const meta = LEGACY_CONTROL_META[target];
   if (!meta) return;
   const el = $(meta.badgeId);
   if (!el) return;
@@ -1591,7 +1626,7 @@ function setControlBadge(target, statusText, styleKind) {
   );
 }
 
-function renderControlResult(data) {
+function legacyShowControlResult(data) {
   const wrap = $('controlResult');
   wrap.classList.remove('hidden');
   const steps = Array.isArray(data.steps) ? data.steps : [];
@@ -1615,9 +1650,9 @@ function renderControlResult(data) {
   `;
 }
 
-async function runProcessControl(target, action, triggerBtn) {
+async function legacyDispatchControlRequest(target, action, triggerBtn) {
   if (!selectedRow) throw new Error('Step 2에서 Target DB를 먼저 선택해주세요.');
-  const meta = CONTROL_TARGET_META[target];
+  const meta = LEGACY_CONTROL_META[target];
   if (!meta) throw new Error(`Unsupported target: ${target}`);
   const user = $(meta.userId).value.trim();
   const password = $(meta.passId).value;
@@ -1631,8 +1666,8 @@ async function runProcessControl(target, action, triggerBtn) {
   statusEl.innerHTML = `<span class="spinner"></span> ${meta.label} ${action} 실행 중...`;
   $('controlResult').classList.add('hidden');
   $('controlResult').innerHTML = '';
-  setControlBadge(target, 'RUNNING', 'running');
-  setProcessControlButtonsDisabled(true);
+  legacyApplyControlBadge(target, 'RUNNING', 'running');
+  legacyToggleControlButtons(true);
   if (triggerBtn) triggerBtn.disabled = true;
 
   try {
@@ -1640,7 +1675,7 @@ async function runProcessControl(target, action, triggerBtn) {
       db_id: selectedRow.db_id,
       action,
       target,
-      control_credentials: buildControlCredentialsPayload(),
+      control_credentials: legacyControlPayload(),
       ssh_user: $('sshUser').value.trim(),
       ssh_password: $('sshPassword').value,
       conf_name: selectedRow.instance_name || undefined,
@@ -1653,25 +1688,19 @@ async function runProcessControl(target, action, triggerBtn) {
     const json = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(json.error || `${meta.label} ${action} failed`);
     statusEl.classList.add('hidden');
-    renderControlResult(json);
-    setControlBadge(target, json.overall_status === 'pass' ? action.toUpperCase() : 'FAIL', json.overall_status === 'pass' ? 'pass' : 'fail');
+    legacyShowControlResult(json);
+    legacyApplyControlBadge(target, json.overall_status === 'pass' ? action.toUpperCase() : 'FAIL', json.overall_status === 'pass' ? 'pass' : 'fail');
   } catch (e) {
     statusEl.classList.remove('hidden');
     statusEl.style.color = 'var(--fail)';
     statusEl.textContent = e.message;
-    setControlBadge(target, 'FAIL', 'fail');
+    legacyApplyControlBadge(target, 'FAIL', 'fail');
   } finally {
-    setProcessControlButtonsDisabled(!selectedRow);
+    legacyToggleControlButtons(!selectedRow);
   }
 }
 
 // ─── Run Check ─────────────────────────────
-document.querySelectorAll('.control-action-btn').forEach(btn => {
-  btn.addEventListener('click', async () => {
-    await runProcessControl(btn.dataset.target, btn.dataset.action, btn);
-  });
-});
-
 if ($('btnDiscover')) {
   $('btnDiscover').onclick = async () => {
     await runServiceDiscover();
@@ -2682,7 +2711,6 @@ function resetTargetDbArea() {
   $('btnCpuMemSnapshot').disabled = true;
   $('btnCpuMemWindow').disabled = true;
   $('btnCpuMemStartPoll').disabled = true;
-  setProcessControlButtonsDisabled(true);
   $('targetPassword').value = '';
   $('targetSelectedInfo').innerHTML = '<span class="badge badge-disconnected">NO TARGET</span><span>Step 2에서 Target DB를 선택해주세요</span>';
   $('dbTable').innerHTML = '<tr><td colspan="8" class="empty">Repo DB 연결 후 목록을 조회하세요</td></tr>';
@@ -2695,7 +2723,7 @@ function resetTargetDbArea() {
   $('dbStatus').classList.add('hidden');
   if ($('processControlTargetInfo')) $('processControlTargetInfo').innerHTML = '<span class="badge badge-disconnected">NO TARGET</span><span>Step 2에서 Target DB를 선택해주세요</span>';
   if ($('controlOracleSid')) $('controlOracleSid').textContent = '-';
-  Object.keys(CONTROL_TARGET_META).forEach(target => setControlBadge(target, 'IDLE', 'idle'));
+  Object.keys(LEGACY_CONTROL_META).forEach(target => legacyApplyControlBadge(target, 'IDLE', 'idle'));
 }
 
 function resetResultArea() {
@@ -2747,10 +2775,14 @@ if (false && $('btnRunRepoNew')) $('btnRunRepoNew').onclick = async () => {
     // POL Repo 파라미터 (선택)
     if (selectedPolRepoConfigId) {
       body.pol_repo_config_id = selectedPolRepoConfigId;
-      const polSchemaVal = ($('polRepoSchemaName')?.value || '').trim();
-      const polDbIdVal = ($('polRepoDbIdList')?.value || '').trim();
+      const polSchemaInputVal = ($('polRepoSchemaName')?.value || '').trim();
+      const polSchemaVal = polSchemaInputVal || String(selectedRow2?.instance_name || '').trim();
+      const polDbIdInputVal = ($('polRepoDbIdList')?.value || '').trim();
+      const polDbIdAutoVal = selectedRow2?.db_id ? String(selectedRow2.db_id) : '';
+      const polDbIdVal = (!polRepoDbIdTouched && polDbIdAutoVal) ? polDbIdAutoVal : (polDbIdInputVal || polDbIdAutoVal);
       if (polSchemaVal) body.pol_repo_schema_name = polSchemaVal;
       if (polDbIdVal) body.pol_repo_db_id_list = polDbIdVal;
+      if (!body.pol_repo_db_id_list) throw new Error('두번째 Repo Target을 먼저 선택하거나 POL db_id를 입력해주세요.');
     }
 
     const res = await fetch(`${API_RTS}/run-repo-new-job`, {
@@ -2910,10 +2942,14 @@ $('btnRunRepoStep5').onclick = async () => {
     setRepoTableDownloadState(false);
     if (selectedPolRepoConfigId) {
       body.pol_repo_config_id = selectedPolRepoConfigId;
-      const polSchemaVal = ($('polRepoSchemaName')?.value || '').trim();
-      const polDbIdVal   = ($('polRepoDbIdList')?.value  || '').trim();
+      const polSchemaInputVal = ($('polRepoSchemaName')?.value || '').trim();
+      const polSchemaVal = polSchemaInputVal || String(selectedRow2?.instance_name || '').trim();
+      const polDbIdInputVal = ($('polRepoDbIdList')?.value || '').trim();
+      const polDbIdAutoVal = selectedRow2?.db_id ? String(selectedRow2.db_id) : '';
+      const polDbIdVal = (!polRepoDbIdTouched && polDbIdAutoVal) ? polDbIdAutoVal : (polDbIdInputVal || polDbIdAutoVal);
       if (polSchemaVal) body.pol_repo_schema_name = polSchemaVal;
       if (polDbIdVal)   body.pol_repo_db_id_list  = polDbIdVal;
+      if (!body.pol_repo_db_id_list) throw new Error('두번째 Repo Target을 먼저 선택하거나 POL db_id를 입력해주세요.');
     }
     const res = await fetch(`${API_RTS}/run-repo-step5-job`, {
       method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)
