@@ -138,6 +138,30 @@ def _ordered_unique(items: List[str]) -> List[str]:
     return out
 
 
+def _parent_dir(path: str) -> Optional[str]:
+    normalized = str(path or "").rstrip("/")
+    if not normalized or normalized == "/":
+        return None
+    if "/" not in normalized:
+        return None
+    parent = normalized.rsplit("/", 1)[0]
+    return parent or "/"
+
+
+def _normalize_remote_path(path: str, base_dir: str) -> str:
+    raw = str(path or "").strip()
+    if not raw:
+        return ""
+    if raw.startswith("/"):
+        return raw.rstrip("/")
+    base = str(base_dir or "").rstrip("/")
+    if not base:
+        return raw.rstrip("/")
+    if raw.startswith("./"):
+        raw = raw[2:]
+    return f"{base}/{raw.lstrip('/')}".rstrip("/")
+
+
 def _make_discovery_result(service_key: str) -> Dict[str, Any]:
     label = SERVICE_DISCOVERY_RULES.get(service_key, {}).get("label", service_key)
     return {
@@ -374,17 +398,137 @@ def discover_services_with_ssh(
 # 개별 점검 스텝
 # ────────────────────────────────────────────────────────
 
+def _candidate_log_dirs(seed_dir: str) -> List[str]:
+    seed = str(seed_dir or "").rstrip("/")
+    if not seed:
+        return []
+    lowered = seed.lower()
+    if lowered.endswith("/log/maxgauge") or lowered.endswith("/logs/maxgauge"):
+        return [seed]
+    if lowered.endswith("/log") or lowered.endswith("/logs"):
+        return [f"{seed}/maxgauge", seed]
+    return [
+        f"{seed}/log/maxgauge",
+        f"{seed}/logs/maxgauge",
+        f"{seed}/log",
+        f"{seed}/logs",
+    ]
+
+
+def _dir_exists_ssh(ssh: _SSHSession, path: str, timeout: int = 3) -> bool:
+    out, _, _ = ssh.run(f"test -d {_shell_quote(path)} && echo Y || echo N", timeout=timeout)
+    return out.strip() == "Y"
+
+
+def _mxgrc_log_seeds(ssh: _SSHSession, conf_dir: str) -> List[str]:
+    mxgrc_path = f"{conf_dir.rstrip('/')}/.mxgrc"
+    cmd = (
+        f"if test -f {_shell_quote(mxgrc_path)}; then "
+        f"cd {_shell_quote(conf_dir.rstrip('/'))} && . ./.mxgrc >/dev/null 2>&1; "
+        f"for _v in MAXLOGDIR MAX_LOG_DIR LOGDIR LOG_DIR MAXGAUGE_LOG_DIR MXG_LOG_DIR RTS_LOG_DIR; do "
+        f"  eval \"_val=\\${{$_v}}\"; "
+        f"  if test -n \"$_val\"; then echo \"$_val\"; fi; "
+        f"done; "
+        f"fi"
+    )
+    out, _, _ = ssh.run(cmd, timeout=5)
+    return _ordered_unique(out.splitlines())
+
+
+def _find_log_dir_in_root(ssh: _SSHSession, root: str, os_type: str) -> Optional[str]:
+    rq = _shell_quote(root)
+    if os_type == "aix":
+        dir_find_cmd = f"find {rq} -follow -maxdepth 4 -type d 2>/dev/null"
+        file_find_cmd = f"find {rq} -follow -maxdepth 4 -type f 2>/dev/null"
+    elif os_type in ("linux", "unknown"):
+        dir_find_cmd = f"find {rq} -maxdepth 4 -type d 2>/dev/null"
+        file_find_cmd = f"find {rq} -maxdepth 4 -type f 2>/dev/null"
+    else:
+        dir_find_cmd = f"find {rq} -type d 2>/dev/null"
+        file_find_cmd = f"find {rq} -type f 2>/dev/null"
+
+    out, _, _ = ssh.run(
+        f"{dir_find_cmd} | grep -iE '/logs?/maxgauge$' | head -5",
+        timeout=15,
+    )
+    dirs = [line.strip() for line in out.splitlines() if line.strip()]
+    if dirs:
+        return dirs[0]
+
+    out, _, _ = ssh.run(
+        f"{file_find_cmd} | grep -i '/log/' | grep -iE '/(rts|sndf|obsd|updater)[^/]*$' | head -1",
+        timeout=20,
+    )
+    file_path = out.strip().splitlines()[0] if out.strip() else ""
+    if file_path:
+        dir_out, _, _ = ssh.run(f"dirname {_shell_quote(file_path)}", timeout=3)
+        resolved = dir_out.strip()
+        if resolved:
+            return resolved
+    return None
+
+
+def _resolve_log_dir(
+    ssh: _SSHSession,
+    conf_dir: str,
+    os_type: str = "unknown",
+) -> Tuple[Optional[str], str]:
+    conf_root = str(conf_dir or "").rstrip("/")
+    parent = _parent_dir(conf_root)
+    seed_dirs = [conf_root]
+    if parent:
+        seed_dirs.extend(
+            [
+                parent,
+                f"{parent}/maxgauge",
+                f"{parent}/mxg",
+                f"{parent}/MAXGAUGE",
+                f"{parent}/MXG",
+            ]
+        )
+
+    mxgrc_seeds = _ordered_unique([
+        _normalize_remote_path(seed, conf_root)
+        for seed in _mxgrc_log_seeds(ssh, conf_root)
+    ])
+    search_roots = _ordered_unique(seed_dirs + mxgrc_seeds)
+    candidate_dirs: List[str] = []
+    for seed in search_roots:
+        candidate_dirs.extend(_candidate_log_dirs(seed))
+    candidate_dirs = _ordered_unique(candidate_dirs)
+
+    for candidate in candidate_dirs:
+        if _dir_exists_ssh(ssh, candidate):
+            return candidate, f"candidate -> {candidate}"
+
+    for root in search_roots:
+        if not _dir_exists_ssh(ssh, root):
+            continue
+        found = _find_log_dir_in_root(ssh, root, os_type)
+        if found:
+            return found, f"searched {root} -> {found}"
+
+    diag = f"conf_dir={conf_root}; candidates={candidate_dirs}; roots={search_roots}"
+    return None, diag
+
+
 def _log_root(conf_dir: str) -> str:
     """로그 디렉터리 경로: {conf_dir}/log/maxgauge"""
     return f"{conf_dir}/log/maxgauge"
 
 
-def _step_log_dirs(ssh: _SSHSession, conf_dir: str) -> Dict[str, Any]:
+def _step_log_dirs(ssh: _SSHSession, log_dir: Optional[str], log_dir_diag: str = "") -> Dict[str, Any]:
     """Step 1: {conf_dir}/log/maxgauge 아래 rts/sndf/obsd 이름이 포함된 로그 파일 존재 여부"""
     t0 = time.time()
-    log_dir = _log_root(conf_dir)
+    if not log_dir:
+        return _step_result(
+            "log_directory_check", "fail",
+            f"log directory not resolved ({log_dir_diag})",
+            _elapsed_ms(t0),
+        )
 
-    out, err, rc = ssh.run(f"test -d {log_dir} && echo DIR_OK || echo DIR_MISSING")
+    log_dir_q = _shell_quote(log_dir)
+    out, err, rc = ssh.run(f"test -d {log_dir_q} && echo DIR_OK || echo DIR_MISSING")
     if "DIR_MISSING" in out:
         return _step_result(
             "log_directory_check", "fail",
@@ -396,7 +540,7 @@ def _step_log_dirs(ssh: _SSHSession, conf_dir: str) -> Dict[str, Any]:
     for d in DAEMONS:
         # OS별 find 옵션 차이를 피하기 위해 portable 명령만 사용
         fout, _, _ = ssh.run(
-            f"find {log_dir} -type f 2>/dev/null | grep -i { _shell_quote(d) } | head -5"
+            f"find {log_dir_q} -type f 2>/dev/null | grep -i { _shell_quote(d) } | head -5"
         )
         files = [f for f in fout.strip().splitlines() if f]
         if files:
@@ -597,18 +741,24 @@ def _step_rtsctl_stop_verify(
 
 def _find_latest_log(ssh: _SSHSession, log_dir: str, daemon: str) -> Optional[str]:
     """로그 디렉터리에서 daemon 이름이 포함된 로그 파일 경로를 반환(휴대성 우선)."""
+    log_dir_q = _shell_quote(log_dir)
     out, _, _ = ssh.run(
-        f"find {log_dir} -type f 2>/dev/null | grep -i { _shell_quote(daemon) } | head -1"
+        f"find {log_dir_q} -type f 2>/dev/null | grep -i { _shell_quote(daemon) } | head -1"
     )
     path = out.strip().splitlines()[0] if out.strip() else None
     return path
 
 
-def _step_error_grep(ssh: _SSHSession, conf_dir: str) -> Dict[str, Any]:
+def _step_error_grep(ssh: _SSHSession, log_dir: Optional[str], log_dir_diag: str = "") -> Dict[str, Any]:
     """Step 4: {conf_dir}/log/maxgauge/ 에서 rts/sndf/obsd 로그의 [FATA] / [ERRO] 키워드 grep.
     키워드가 없으면 PASS, 있으면 FAIL."""
     t0 = time.time()
-    log_dir = _log_root(conf_dir)
+    if not log_dir:
+        return _step_result(
+            "error_log_grep", "fail",
+            f"log directory not resolved ({log_dir_diag})",
+            _elapsed_ms(t0),
+        )
     # [FATA] 또는 [ERRO] 패턴 — grep -F 로 고정 문자열 매칭 (정규식 불필요)
     findings: List[str] = []
     error_samples: List[str] = []
@@ -624,7 +774,8 @@ def _step_error_grep(ssh: _SSHSession, conf_dir: str) -> Dict[str, Any]:
 
         fname = log_file.rsplit("/", 1)[-1]
         # grep -F: 고정 문자열, -e: 패턴 여러 개
-        cmd = f"grep -F -e '[FATA]' -e '[ERRO]' {log_file} 2>/dev/null | tail -5"
+        log_file_q = _shell_quote(log_file)
+        cmd = f"grep -F -e '[FATA]' -e '[ERRO]' {log_file_q} 2>/dev/null | tail -5"
         out, _, _ = ssh.run(cmd)
         text = out.strip()
         if text:
@@ -699,10 +850,15 @@ def _step_resource_usage(ssh: _SSHSession, pid_map: Dict[str, Optional[str]]) ->
     return _step_result("resource_usage", "skip", "ps returned no data", _elapsed_ms(t0))
 
 
-def _step_abnormal_signals(ssh: _SSHSession, conf_dir: str) -> Dict[str, Any]:
+def _step_abnormal_signals(ssh: _SSHSession, log_dir: Optional[str], log_dir_diag: str = "") -> Dict[str, Any]:
     """Step 5: {conf_dir}/log/maxgauge/ 에서 SIGBUS, SIGSEGV 등 비정상 종료 징후 검색"""
     t0 = time.time()
-    log_dir = _log_root(conf_dir)
+    if not log_dir:
+        return _step_result(
+            "abnormal_signal_check", "fail",
+            f"log directory not resolved ({log_dir_diag})",
+            _elapsed_ms(t0),
+        )
     keyword_pattern = "|".join(_ABNORMAL_KEYWORDS)
     findings: List[str] = []
     log_samples: List[str] = []
@@ -717,7 +873,8 @@ def _step_abnormal_signals(ssh: _SSHSession, conf_dir: str) -> Dict[str, Any]:
             continue
 
         fname = log_file.rsplit("/", 1)[-1]
-        cmd = f"grep -iE '{keyword_pattern}' {log_file} | tail -3"
+        log_file_q = _shell_quote(log_file)
+        cmd = f"grep -iE '{keyword_pattern}' {log_file_q} | tail -3"
         out, err, rc = ssh.run(cmd)
         text = out.strip()
         if text:
@@ -868,6 +1025,7 @@ def _resolve_conf_dir(
     """
     diag: List[str] = []
     conf_q = _shell_quote(conf_name)
+    preferred_base: Optional[str] = None
 
     def _safe_run(cmd: str, timeout: int = CMD_TIMEOUT) -> Tuple[str, str, int]:
         try:
@@ -999,10 +1157,19 @@ def _resolve_conf_dir(
     # ── 1) 사용자가 base_dir 직접 입력 ─────────────────────────────────
     if user_base_dir:
         base = user_base_dir.rstrip("/")
+        diag.append(f"user_base_dir={base}")
         for cand in [f"{base}/{conf_name}", base]:
-            if _has_mxgrc(cand):
+            if _check_dir(cand):
                 return cand, f"user_base_dir={base} → {cand}"
-        return base, f"user_base_dir={base} (no .mxgrc found, returning as-is)"
+        deep_match = _find_matching_conf_dir_in(base)
+        if deep_match:
+            return deep_match, f"user_base_dir recursive match ??{deep_match}"
+        for rtsctl_path in _find_rtsctl_in(base):
+            d = _rtsctl_to_dir(rtsctl_path)
+            if d:
+                return d, f"user_base_dir rtsctl ??{d}"
+        preferred_base = base
+        diag.append(f"user_base_dir fallback root={base}")
 
     # ── 2) 서버의 최상위 디렉터리를 동적으로 수집 ────────────────────────
     # ls / 는 모든 Unix에서 동작. 가상 FS 및 시스템 디렉터리는 제외.
@@ -1029,7 +1196,7 @@ def _resolve_conf_dir(
     ]
     seen: set = set()
     roots: List[str] = []
-    for r in fixed + dyn_roots:
+    for r in ([preferred_base] if preferred_base else []) + fixed + dyn_roots:
         if r and r not in seen:
             seen.add(r)
             roots.append(r)
@@ -1551,14 +1718,16 @@ def run_rts_check(
             result["total_duration_ms"] = _elapsed_ms(total_t0)
             return result
         result["resolved_conf_dir"] = resolved_conf_dir
+        resolved_log_dir, log_dir_diag = _resolve_log_dir(ssh, resolved_conf_dir, os_type=detected_os)
+        result["resolved_log_dir"] = resolved_log_dir
         stop = on_failure == "stop_at_first_failure"
 
         step_funcs = [
-            lambda: _step_log_dirs(ssh, resolved_conf_dir),
+            lambda: _step_log_dirs(ssh, resolved_log_dir, log_dir_diag),
             lambda: _step_rtsctl_stat(ssh, resolved_conf_dir),
             lambda: _step_pid_match(ssh, resolved_conf, pid_map),
-            lambda: _step_error_grep(ssh, resolved_conf_dir),
-            lambda: _step_abnormal_signals(ssh, resolved_conf_dir),
+            lambda: _step_error_grep(ssh, resolved_log_dir, log_dir_diag),
+            lambda: _step_abnormal_signals(ssh, resolved_log_dir, log_dir_diag),
         ]
 
         pid_map: Dict[str, Optional[str]] = {d: None for d in DAEMONS}
