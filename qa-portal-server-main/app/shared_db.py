@@ -2,6 +2,7 @@
 import oracledb
 import json
 import os
+import errno
 from datetime import datetime
 from typing import Optional, Dict, Any
 import logging
@@ -13,7 +14,45 @@ _db_connections = {"target": None, "repo": None}
 _config_file = "db_config.json"  # 백업용으로 유지
 _legacy_setup_file = "db_setup.json"
 _default_profile_id = None  # 현재 사용 중인 프로필 ID
+_local_config_write_state: Optional[bool] = None
 _logger = logging.getLogger(__name__)
+
+def _mark_local_config_unwritable(reason: Optional[str] = None) -> bool:
+    global _local_config_write_state
+
+    if _local_config_write_state is not False:
+        suffix = f" ({reason})" if reason else ""
+        if db_config_service.is_connected():
+            _logger.info(
+                f"db_config.json is not writable; continuing with MongoDB/in-memory config only{suffix}"
+            )
+        else:
+            _logger.warning(
+                f"db_config.json is not writable; config changes will stay in memory only{suffix}"
+            )
+    _local_config_write_state = False
+    return False
+
+
+def _can_write_local_config() -> bool:
+    global _local_config_write_state
+
+    if _local_config_write_state is False:
+        return False
+
+    path = os.path.abspath(_config_file)
+    if os.path.exists(path):
+        writable = os.access(path, os.W_OK)
+    else:
+        parent_dir = os.path.dirname(path) or os.getcwd()
+        writable = os.access(parent_dir, os.W_OK)
+
+    if writable:
+        _local_config_write_state = True
+        return True
+
+    return _mark_local_config_unwritable()
+
 
 def _load_config_from_mongodb():
     """MongoDB에서 기본 연결 프로필 로드"""
@@ -101,6 +140,25 @@ def _save_config():
 # 모듈 로드 시 MongoDB에서 기본 설정 불러오기
 _load_config_from_mongodb()
 
+# Override the legacy raw saver so read-only container mounts do not behave like write errors.
+def _save_config():
+    """Persist the local JSON backup only when the runtime can write it."""
+    if not _can_write_local_config():
+        return False
+
+    try:
+        with open(_config_file, 'w', encoding='utf-8') as f:
+            json.dump(_db_connections, f, ensure_ascii=False, indent=2)
+        return True
+    except OSError as e:
+        if e.errno in (errno.EROFS, errno.EACCES, errno.EPERM):
+            return _mark_local_config_unwritable(str(e))
+        _logger.error(f"DB 설정 저장 실패: {e}")
+        return False
+    except Exception as e:
+        _logger.error(f"DB 설정 저장 실패: {e}")
+        return False
+
 def _infer_db_engine(cfg: Dict[str, Any], default: str) -> str:
     explicit = cfg.get('db_type') or cfg.get('type')
     if isinstance(explicit, str) and explicit.strip():
@@ -154,6 +212,16 @@ def _connect_postgres_db(config: Dict[str, Any]):
         raise ValueError(
             f"PostgreSQL 연결 실패 ({user}@{host}:{port}/{database or '(database 미지정)'}): {e}"
         ) from e
+
+
+def _normalize_postgres_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        'host': config.get('host', 'localhost'),
+        'port': int(config.get('port', config.get('db_port', 5432)) or 5432),
+        'database': config.get('database') or config.get('service') or '',
+        'user': config.get('user') or config.get('db_user') or '',
+        'password': config.get('password') or config.get('db_password') or '',
+    }
 
 
 def _build_oracle_dsn(config: Dict[str, Any]) -> str:
@@ -301,7 +369,14 @@ def get_connection(db_type): # get_db_confing -> 내부적으로 _db_connections
         engine = _infer_db_engine(config, 'postgresql')
         if engine == 'oracle':
             return _connect_oracle_db(config)
-        return _connect_postgres_db(config)
+        from app.services.postgresql_service import PostgreSQLService
+        normalized = _normalize_postgres_config(config)
+        conn = PostgreSQLService(normalized).connect()
+        if conn is None:
+            raise ValueError(
+                f"PostgreSQL connection failed ({normalized['user']}@{normalized['host']}:{normalized['port']}/{normalized['database'] or '(database not set)'})"
+            )
+        return conn
     
     # Target DB는 항상 Oracle
     return _connect_oracle_db(config)
@@ -314,13 +389,7 @@ def release_connection(db_type, connection):
         engine = _infer_db_engine(config, 'postgresql' if db_type == 'repo' else 'oracle')
         if engine == 'postgresql':
             from app.services.postgresql_service import PostgreSQLService
-            normalized = {
-                'host': config.get('host', 'localhost'),
-                'port': int(config.get('port', config.get('db_port', 5432)) or 5432),
-                'database': config.get('database') or config.get('service') or '',
-                'user': config.get('user') or config.get('db_user') or '',
-                'password': config.get('password') or config.get('db_password') or '',
-            }
+            normalized = _normalize_postgres_config(config)
             PostgreSQLService(normalized).release_connection(connection)
             return
         if engine == 'oracle':
@@ -411,15 +480,17 @@ def connect_repo_by_config_id(config_id: str):
         if not target:
             raise ValueError(f"config_id not found: {config_id}")
         normalized = {
-            'host': target.get('host', ''),
-            'port': int(target.get('port', target.get('db_port', 5432)) or 5432),
-            'user': (
-                target.get('username') or target.get('db_user') or target.get('user') or ''
-            ),
-            'password': target.get('password') or target.get('db_password') or '',
-            'database': (
-                target.get('database') or target.get('service_name') or target.get('service') or ''
-            ),
+            **_normalize_postgres_config({
+                'host': target.get('host', ''),
+                'port': target.get('port', target.get('db_port', 5432)),
+                'user': (
+                    target.get('username') or target.get('db_user') or target.get('user') or ''
+                ),
+                'password': target.get('password') or target.get('db_password') or '',
+                'database': (
+                    target.get('database') or target.get('service_name') or target.get('service') or ''
+                ),
+            }),
             'schema_name': target.get('schema_name', ''),
             'db_type': target.get('db_type', 'postgresql').lower(),
         }

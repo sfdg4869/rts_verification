@@ -11,6 +11,7 @@ import uuid
 import os
 import json
 import tempfile
+from typing import Any, Dict, List
 
 bp = Blueprint("rts_check", __name__, url_prefix="/api/v2/rts/check")
 _REPO_JOB_LOCK = threading.Lock()
@@ -90,6 +91,99 @@ def _load_repo_jobs_from_disk() -> None:
             _REPO_JOBS.update(loaded)
     except Exception:
         return
+
+
+def _normalize_repo_mode(value: Any, default: str = "vsql") -> str:
+    mode = str(value or "").strip().lower()
+    return mode if mode in {"vsql", "pol"} else default
+
+
+def _normalize_target_mapping(raw: Any) -> Dict[str, Any]:
+    mapping = dict(raw or {})
+    return {
+        "db_id_list": str(mapping.get("db_id_list") or "").strip() or None,
+        "schema_name": str(mapping.get("schema_name") or "").strip() or None,
+    }
+
+
+def _normalize_repo_query_item(item: Any, default_slot_id: str = "repo_a") -> Dict[str, Any]:
+    raw = dict(item or {})
+    slot_id = str(raw.get("slot_id") or default_slot_id or "repo_a").strip().lower()
+    if slot_id not in {"repo_a", "repo_b"}:
+        slot_id = default_slot_id if default_slot_id in {"repo_a", "repo_b"} else "repo_a"
+    source_type = str(raw.get("source_type") or "").strip().lower()
+    if source_type not in {"active_repo", "config", "direct"}:
+        if raw.get("config_id"):
+            source_type = "config"
+        elif raw.get("direct_config"):
+            source_type = "direct"
+        else:
+            source_type = "active_repo"
+    return {
+        "slot_id": slot_id,
+        "source_type": source_type,
+        "config_id": str(raw.get("config_id") or "").strip() or None,
+        "direct_config": dict(raw.get("direct_config") or {}),
+        "mode": _normalize_repo_mode(raw.get("mode")),
+        "target_mapping": _normalize_target_mapping(raw.get("target_mapping")),
+    }
+
+
+def _normalize_repo_queries_payload(data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    raw_queries = data.get("repo_queries")
+    if isinstance(raw_queries, list):
+        queries: List[Dict[str, Any]] = []
+        seen_slots = set()
+        for idx, item in enumerate(raw_queries):
+            query = _normalize_repo_query_item(item, "repo_a" if idx == 0 else "repo_b")
+            if query["slot_id"] in seen_slots:
+                continue
+            seen_slots.add(query["slot_id"])
+            queries.append(query)
+        return queries
+
+    queries = [
+        _normalize_repo_query_item(
+            {
+                "slot_id": "repo_a",
+                "source_type": "active_repo",
+                "mode": data.get("repo_mode") or "vsql",
+                "target_mapping": {
+                    "db_id_list": data.get("repo_db_id_list"),
+                    "schema_name": data.get("schema_name") or data.get("repo_pg_schema"),
+                },
+            },
+            "repo_a",
+        )
+    ]
+
+    pol_direct_config = data.get("pol_repo_direct_config") or data.get("pol_direct_config")
+    if data.get("pol_repo_config_id") or pol_direct_config:
+        queries.append(
+            _normalize_repo_query_item(
+                {
+                    "slot_id": "repo_b",
+                    "source_type": "direct" if pol_direct_config else "config",
+                    "config_id": data.get("pol_repo_config_id"),
+                    "direct_config": pol_direct_config,
+                    "mode": data.get("pol_repo_mode") or "pol",
+                    "target_mapping": {
+                        "db_id_list": data.get("pol_repo_db_id_list"),
+                        "schema_name": data.get("pol_repo_schema_name"),
+                    },
+                },
+                "repo_b",
+            )
+        )
+    return queries
+
+
+def _estimate_repo_new_total_steps(repo_queries: List[Dict[str, Any]]) -> int:
+    return 5 + len(repo_queries)
+
+
+def _estimate_repo_step5_total_steps(repo_queries: List[Dict[str, Any]]) -> int:
+    return 2 + len(repo_queries)
 
 
 _RUN_SPEC = {
@@ -381,16 +475,17 @@ def set_repo_from_mongodb():
 
     data = request.get_json(silent=True) or {}
     config_id = data.get("config_id")
-    if not config_id:
-        return jsonify({"error": "config_id is required"}), 400
+    direct_config = dict(data.get("direct_config") or {})
+    if not config_id and not direct_config:
+        return jsonify({"error": "config_id or direct_config is required"}), 400
 
-    service = DBConfigService()
-    if not service.is_connected():
+    service = DBConfigService() if not direct_config else None
+    if service and not service.is_connected():
         return jsonify({"error": "MongoDB 연결 실패"}), 500
 
     collection = service.db_configs_collection
     doc = collection.find_one({"id": config_id})
-    if not doc:
+    if service and not doc:
         return jsonify({"error": f"config_id '{config_id}' not found"}), 400
 
     stype = (
@@ -556,15 +651,16 @@ def get_db_list_pol():
 
     data = request.get_json(silent=True) or {}
     config_id = data.get("config_id")
-    if not config_id:
-        return jsonify({"error": "config_id is required"}), 400
+    direct_config = dict(data.get("direct_config") or {})
+    if not config_id and not direct_config:
+        return jsonify({"error": "config_id or direct_config is required"}), 400
 
-    service = DBConfigService()
-    if not service.is_connected():
+    service = DBConfigService() if not direct_config else None
+    if service and not service.is_connected():
         return jsonify({"error": "MongoDB 연결 실패"}), 500
 
-    doc = service.db_configs_collection.find_one({"id": config_id})
-    if not doc:
+    doc = service.db_configs_collection.find_one({"id": config_id}) if service else direct_config
+    if service and not doc:
         return jsonify({"error": f"config_id '{config_id}' not found"}), 400
 
     cfg = {
@@ -898,6 +994,7 @@ def run_repo_new_api():
     repo_partition_date = data.get("repo_partition_date")
     repo_logging_time = data.get("repo_logging_time")
     repo_schema_name = (data.get("schema_name") or data.get("repo_pg_schema") or "").strip() or None
+    repo_queries = _normalize_repo_queries_payload(data)
 
     if not db_id and not target_cfg:
         return jsonify({"error": "db_id or target_config is required"}), 400
@@ -931,6 +1028,7 @@ def run_repo_new_api():
             repo_partition_date=repo_partition_date,
             repo_logging_time=repo_logging_time,
             repo_schema_name=repo_schema_name,
+            repo_queries=repo_queries,
         )
         return jsonify(result), 200
     except Exception as e:
@@ -957,6 +1055,8 @@ def run_repo_new_job_api():
     pol_repo_config_id = data.get("pol_repo_config_id") or None
     pol_repo_schema_name = (data.get("pol_repo_schema_name") or "").strip() or None
     pol_repo_db_id_list = data.get("pol_repo_db_id_list") or None
+    repo_queries = _normalize_repo_queries_payload(data)
+    total_steps = _estimate_repo_new_total_steps(repo_queries)
 
     if not db_id and not target_cfg:
         return jsonify({"error": "db_id or target_config is required"}), 400
@@ -969,7 +1069,7 @@ def run_repo_new_job_api():
             "status": "running",
             "started_at": int(time.time()),
             "completed_steps": 0,
-            "total_steps": 6,
+            "total_steps": total_steps,
             "current_step": "",
             "current_step_status": "",
             "progress_pct": 0,
@@ -1026,12 +1126,13 @@ def run_repo_new_job_api():
                 pol_repo_config_id=pol_repo_config_id,
                 pol_repo_schema_name=pol_repo_schema_name,
                 pol_repo_db_id_list=pol_repo_db_id_list,
+                repo_queries=repo_queries,
             )
             with _REPO_JOB_LOCK:
                 job = _REPO_JOBS.get(job_id)
                 if job:
                     job["status"] = "done"
-                    job["completed_steps"] = 6
+                    job["completed_steps"] = job["total_steps"]
                     job["progress_pct"] = 100
                     job["result"] = result
                     _persist_repo_jobs()
@@ -1140,13 +1241,15 @@ def run_repo_step5_job_api():
     pol_repo_db_id_list  = data.get("pol_repo_db_id_list") or None
     target_cfg           = data.get("target_config") or None
     sys_password         = data.get("sys_password") or None
+    repo_queries         = _normalize_repo_queries_payload(data)
+    total_steps          = _estimate_repo_step5_total_steps(repo_queries)
 
     job_id = str(uuid.uuid4())
     with _REPO_JOB_LOCK:
         _REPO_JOBS[job_id] = {
             "job_id": job_id, "type": "repo_step5",
             "status": "running", "started_at": int(time.time()),
-            "completed_steps": 0, "total_steps": 3,
+            "completed_steps": 0, "total_steps": total_steps,
             "current_step": "", "current_step_status": "", "progress_pct": 0,
             "result": None, "error": None,
         }
@@ -1173,6 +1276,7 @@ def run_repo_step5_job_api():
                 pol_repo_config_id=pol_repo_config_id,
                 pol_repo_schema_name=pol_repo_schema_name,
                 pol_repo_db_id_list=pol_repo_db_id_list,
+                repo_queries=repo_queries,
                 target_config=target_cfg,
                 sys_password=sys_password,
                 progress_callback=_progress,
@@ -1181,7 +1285,7 @@ def run_repo_step5_job_api():
                 job = _REPO_JOBS.get(job_id)
                 if job:
                     job["status"] = "done"
-                    job["completed_steps"] = 2
+                    job["completed_steps"] = job["total_steps"]
                     job["progress_pct"] = 100
                     job["result"] = result
                     _persist_repo_jobs()

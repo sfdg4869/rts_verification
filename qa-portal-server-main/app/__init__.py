@@ -1,12 +1,9 @@
-from flask import Flask, redirect, send_file
+from flask import Flask, redirect, render_template, make_response
 from flasgger import Swagger
 from flask_cors import CORS
 import os
 
 from app.routes import blueprints
-
-
-_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 
 SWAGGER_TEMPLATE = {
@@ -116,6 +113,10 @@ def create_app():
 
     @app.route("/rts-check")
     def _rts_check_ui():
-        return send_file(os.path.join(_REPO_ROOT, "rts_check.html"))
+        response = make_response(render_template("rts_check.html"))
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        return response
 
     return app

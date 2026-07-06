@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="ko" data-theme="light">
 <head>
 <meta charset="UTF-8">
@@ -610,13 +610,13 @@ input::placeholder { color: var(--theme-text-muted); }
   </div>
 
   <div class="card" id="polRepoCard">
-    <h2><span class="num">4</span> 두번째 Repo 설정 <small style="font-size:.75rem;font-weight:400;color:var(--text2)">(선택 사항 — 신규 Repo 점검에서 POL_RTS 컬럼에 사용됩니다)</small></h2>
+    <h2><span class="num">4</span> 추가 Repo 설정 <small style="font-size:.75rem;font-weight:400;color:var(--text2)">(선택 사항 — 추가 Repo를 사용할 때만 조회됩니다)</small></h2>
     <div id="polRepoStatus">
-      <div class="repo-info"><span class="badge badge-disconnected">미선택</span><span>POL Repo (PG)를 선택하면 신규 Repo 점검 실행 시 POL_RTS 값을 별도 조회합니다.</span></div>
+      <div class="repo-info"><span class="badge badge-disconnected">미선택</span><span>MongoDB 목록에서 추가 Repo를 선택하면 함께 조회할 수 있습니다.</span></div>
     </div>
     <div class="btn-row" style="margin-top:0;margin-bottom:14px">
       <button class="btn btn-secondary" id="btnLoadPolMongo">MongoDB DB 목록 불러오기</button>
-      <button class="btn btn-secondary" id="btnClearPolRepo" style="color:var(--fail)">두번째 Repo 선택 취소</button>
+      <button class="btn btn-secondary" id="btnClearPolRepo" style="color:var(--fail)">추가 Repo 선택 취소</button>
       <span id="polMongoMsg" class="hidden status-msg"></span>
     </div>
     <div id="polMongoListWrap" class="hidden">
@@ -629,22 +629,22 @@ input::placeholder { color: var(--theme-text-muted); }
         </table>
       </div>
       <div class="btn-row">
-        <button class="btn btn-primary" id="btnApplyPolMongo" disabled>두번째 Repo로 설정</button>
+        <button class="btn btn-primary" id="btnApplyPolMongo" disabled>추가 Repo로 설정</button>
         <span id="applyPolMongoMsg" class="hidden status-msg"></span>
       </div>
     </div>
   </div>
 
-  <!-- ────── 5. 두번째 Target 선택 ────── -->
+  <!-- ────── 5. 추가 Repo Target 선택 ────── -->
   <div class="card">
-    <h2><span class="num">5</span> 두번째 Target 선택</h2>
+    <h2><span class="num">5</span> 추가 Repo Target 선택</h2>
     <div class="status-msg" style="color:var(--text2);margin-bottom:10px">
-      Step 4에서 두번째 Repo를 설정한 뒤 아래 버튼으로 해당 Repo의 APM_DB_INFO를 조회하세요.<br>
+      Step 4에서 추가 Repo를 설정한 뒤 아래 버튼으로 해당 Repo의 APM_DB_INFO를 조회하세요.<br>
       <b>Oracle Repo</b>: 행 클릭 시 <b>DB ID</b>가 자동 입력됩니다 &nbsp;|&nbsp;
       <b>PostgreSQL Repo</b>: 행 클릭 시 <b>INSTANCE</b> 값이 schema_name으로 자동 입력됩니다.
     </div>
     <div class="btn-row" style="margin-top:0;margin-bottom:14px">
-      <button class="btn btn-primary" id="btnLoadDbPol" disabled>두번째 Repo DB 목록 조회</button>
+      <button class="btn btn-primary" id="btnLoadDbPol" disabled>추가 Repo DB 목록 조회</button>
       <span id="dbPolStatus" class="hidden" style="font-size:.85rem;color:var(--text2)"></span>
     </div>
     <div id="secondTargetSelectedInfo" class="repo-info" style="margin-bottom:10px">
@@ -657,17 +657,17 @@ input::placeholder { color: var(--theme-text-muted); }
           <th>DB ID</th><th>INSTANCE</th><th>HOST IP</th><th>HOST NAME</th>
           <th>DB USER</th><th>SID</th><th>LSNR PORT</th><th>OS</th>
         </tr></thead>
-        <tbody id="dbTable2"><tr><td colspan="8" class="empty">Step 4에서 두번째 Repo를 설정 후 위 버튼으로 조회하세요</td></tr></tbody>
+        <tbody id="dbTable2"><tr><td colspan="8" class="empty">Step 4에서 추가 Repo를 설정한 뒤 위 버튼으로 조회하세요</td></tr></tbody>
       </table>
     </div>
     <div class="field-grid" style="margin-top:10px">
       <div class="field hidden" id="repoStep5OracleWrap">
-        <label>두번째 Repo db_id (Oracle Repo용) — 행 선택 시 자동 입력, 직접 수정 가능</label>
+        <label>추가 Repo db_id (Oracle Repo용) — 행 선택 시 자동 입력, 직접 수정 가능</label>
         <input id="polRepoDbIdList" placeholder="예: 255 또는 567,569 (비우면 Target db_id)">
       </div>
       <div class="field hidden" id="repoStep5PgWrap">
-        <label>두번째 Repo schema_name (PostgreSQL Repo용) — 행 선택 시 자동 입력, 직접 수정 가능</label>
-        <input id="polRepoSchemaName" placeholder="예: public 또는 l11204_25fn_p2 (비우면 Repo 연결의 schema_name)">
+        <label>추가 Repo schema_name (PostgreSQL Repo용) — 행 선택 시 자동 입력, 직접 수정 가능</label>
+        <input id="polRepoSchemaName" placeholder="예: public 또는 l11204_25fn_p2 (비우면 추가 Repo 연결의 schema_name)">
       </div>
     </div>
     <div id="repoStep5BranchHint" class="status-msg" style="color:var(--text2);margin-top:6px;font-size:12px"></div>
@@ -923,6 +923,99 @@ function _stopRepoQueryCountdown() {
 }
 
 const $ = id => document.getElementById(id);
+
+function getRepoSlotMode(slotId) {
+  if (slotId === 'repo_b') {
+    return $('repoBModePol')?.checked ? 'pol' : 'vsql';
+  }
+  return $('repoAModePol')?.checked ? 'pol' : 'vsql';
+}
+
+function getRepoATargetMapping() {
+  const dbIdInput = ($('repoADbIdList')?.value || '').trim();
+  const schemaInput = ($('repoASchemaName')?.value || '').trim();
+  const isPg = repoStep5Engine === 'postgresql' || repoStep5Engine === 'postgres';
+  return {
+    db_id_list: dbIdInput || (selectedRow?.db_id ? String(selectedRow.db_id) : ''),
+    schema_name: schemaInput || (isPg ? String(selectedRow?.instance_name || '').trim() : ''),
+  };
+}
+
+function getRepoBTargetMapping() {
+  const dbIdInput = ($('polRepoDbIdList')?.value || '').trim();
+  const schemaInput = ($('polRepoSchemaName')?.value || '').trim();
+  const isPg = _polRepoEngine === 'postgresql' || _polRepoEngine === 'postgres';
+  return {
+    db_id_list: dbIdInput || (selectedRow2?.db_id ? String(selectedRow2.db_id) : ''),
+    schema_name: schemaInput || (isPg ? String(selectedRow2?.instance_name || '').trim() : ''),
+  };
+}
+
+function buildRepoQueriesPayload() {
+  const repoQueries = [];
+  if ($('useRepoAQuery')?.checked !== false) {
+    repoQueries.push({
+      slot_id: 'repo_a',
+      source_type: 'active_repo',
+      mode: getRepoSlotMode('repo_a'),
+      target_mapping: getRepoATargetMapping(),
+    });
+  }
+  if ($('useRepoBQuery')?.checked) {
+    if (!selectedPolRepoConfigId) {
+      throw new Error('추가 Repo를 사용하려면 MongoDB 목록에서 먼저 선택해주세요.');
+    }
+    repoQueries.push({
+      slot_id: 'repo_b',
+      source_type: 'config',
+      config_id: selectedPolRepoConfigId,
+      mode: getRepoSlotMode('repo_b'),
+      target_mapping: getRepoBTargetMapping(),
+    });
+  }
+  if (!repoQueries.length) {
+    throw new Error('조회할 Repo를 하나 이상 선택해주세요.');
+  }
+  return repoQueries;
+}
+
+function initRepoSlotUi() {
+  if (!$('repoASlotControls')) {
+    $('repoStatus')?.insertAdjacentHTML('afterend', `
+      <div class="repo-info" id="repoASlotControls" style="margin-top:10px">
+        <span style="font-weight:600;color:var(--theme-text-secondary)">현재 Repo</span>
+        <span><label style="display:inline-flex;align-items:center;gap:6px;margin:0;color:var(--theme-text-secondary)"><input type="radio" name="repoAMode" id="repoAModeVsql" value="vsql" checked style="width:auto"> VSQL</label></span>
+        <span><label style="display:inline-flex;align-items:center;gap:6px;margin:0;color:var(--theme-text-secondary)"><input type="radio" name="repoAMode" id="repoAModePol" value="pol" style="width:auto"> POL</label></span>
+      </div>
+    `);
+  }
+
+  if (!$('repoBSlotControls')) {
+    $('polRepoStatus')?.insertAdjacentHTML('afterend', `
+      <div class="repo-info" id="repoBSlotControls" style="margin-top:10px">
+        <span><label style="display:inline-flex;align-items:center;gap:6px;margin:0;color:var(--theme-text-secondary)"><input id="useRepoBQuery" type="checkbox" style="width:auto"> 추가 Repo 조회</label></span>
+        <span><label style="display:inline-flex;align-items:center;gap:6px;margin:0;color:var(--theme-text-secondary)"><input type="radio" name="repoBMode" id="repoBModeVsql" value="vsql" checked style="width:auto"> VSQL</label></span>
+        <span><label style="display:inline-flex;align-items:center;gap:6px;margin:0;color:var(--theme-text-secondary)"><input type="radio" name="repoBMode" id="repoBModePol" value="pol" style="width:auto"> POL</label></span>
+      </div>
+    `);
+  }
+
+  if (!$('repoASlotMappings')) {
+    $('repoPartitionDate')?.closest('.field-grid')?.insertAdjacentHTML('afterend', `
+      <div id="repoASlotMappings" class="field-grid" style="margin-bottom:12px">
+        <div class="field">
+          <label>현재 Repo db_id_list</label>
+          <input id="repoADbIdList" placeholder="예: 255,567 (비우면 Target db_id)">
+        </div>
+        <div class="field">
+          <label>현재 Repo schema_name</label>
+          <input id="repoASchemaName" placeholder="예: public (비우면 Target instance_name)">
+        </div>
+      </div>
+    `);
+  }
+}
+
 const LEGACY_CONTROL_META = {
   oracle_db: { userId: 'ctrlOracleUser', passId: 'ctrlOraclePass', badgeId: 'controlBadgeOracle', label: 'Oracle DB' },
   rts: { userId: 'ctrlRtsUser', passId: 'ctrlRtsPass', badgeId: 'controlBadgeRts', label: 'RTS' },
@@ -946,11 +1039,11 @@ function syncPolCard5Fields(engine) {
   if (pgWrap)  pgWrap.classList.toggle('hidden',  !isPg);
   if (hint) {
     if (isOracle) {
-      hint.innerHTML = '두번째 Repo = <b>Oracle</b> → 아래 목록에서 Target을 선택하면 <b>DB ID</b>가 자동 입력됩니다.';
+      hint.innerHTML = '추가 Repo = <b>Oracle</b> → 아래 목록에서 Target을 선택하면 <b>DB ID</b>가 자동 입력됩니다.';
     } else if (isPg) {
-      hint.innerHTML = '두번째 Repo = <b>PostgreSQL</b> → 아래 목록에서 Target을 선택하면 <b>schema_name</b>(Instance명)이 자동 입력됩니다.';
+      hint.innerHTML = '추가 Repo = <b>PostgreSQL</b> → 아래 목록에서 Target을 선택하면 <b>schema_name</b>(Instance명)이 자동 입력됩니다.';
     } else {
-      hint.innerHTML = 'Step 4에서 두번째 Repo를 설정하면 Oracle → DB ID / PostgreSQL → schema_name 입력란이 나타납니다.';
+      hint.innerHTML = 'Step 4에서 추가 Repo를 설정하면 Oracle → DB ID / PostgreSQL → schema_name 입력란이 나타납니다.';
     }
   }
 }
@@ -1224,8 +1317,9 @@ $('btnApplyPolMongo').onclick = () => {
   const msg = $('applyPolMongoMsg');
   msg.classList.remove('hidden');
   msg.className = 'status-msg ok';
-  msg.textContent = `POL Repo 설정 완료: ${configId}`;
-  // 두번째 Repo 목록 조회 버튼 활성화 + 자동 로드
+  msg.textContent = `추가 Repo 설정 완료: ${configId}`;
+  if ($('useRepoBQuery')) $('useRepoBQuery').checked = true;
+  // 추가 Repo 목록 조회 버튼 활성화 + 자동 로드
   $('btnLoadDbPol').disabled = false;
   loadDbListPol();
 };
@@ -1234,20 +1328,21 @@ $('btnClearPolRepo').onclick = () => {
   selectedPolRepoConfigId = null;
   polRepoDbIdTouched = false;
   polMongoList = [];
-  $('polRepoStatus').innerHTML = `<div class="repo-info"><span class="badge badge-disconnected">미선택</span><span>POL Repo (PG)를 선택하면 신규 Repo 점검 실행 시 POL_RTS 값을 별도 조회합니다.</span></div>`;
+  $('polRepoStatus').innerHTML = `<div class="repo-info"><span class="badge badge-disconnected">미선택</span><span>MongoDB 목록에서 추가 Repo를 선택하면 함께 조회할 수 있습니다.</span></div>`;
   $('polMongoListWrap').classList.add('hidden');
   $('applyPolMongoMsg').classList.add('hidden');
   $('polMongoMsg').classList.add('hidden');
   $('polMongoTable').innerHTML = '';
   if ($('polRepoSchemaName')) $('polRepoSchemaName').value = '';
   if ($('polRepoDbIdList')) $('polRepoDbIdList').value = '';
+  if ($('useRepoBQuery')) $('useRepoBQuery').checked = false;
   // 카드5 필드 초기화
   _polRepoEngine = '';
   syncPolCard5Fields('');
-  // 두번째 Repo 목록 조회 버튼 비활성화 및 테이블 초기화
+  // 추가 Repo 목록 조회 버튼 비활성화 및 테이블 초기화
   $('btnLoadDbPol').disabled = true;
   $('dbPolStatus').classList.add('hidden');
-  $('dbTable2').innerHTML = '<tr><td colspan="8" class="empty">Step 4에서 두번째 Repo를 설정 후 조회하세요</td></tr>';
+  $('dbTable2').innerHTML = '<tr><td colspan="8" class="empty">Step 4에서 추가 Repo를 설정한 뒤 조회하세요</td></tr>';
   $('secondTargetSelectedInfo').innerHTML = '<span class="badge badge-disconnected">미선택</span><span>아래 목록에서 Target을 선택하세요</span>';
   selectedRow2 = null;
 };
@@ -1334,13 +1429,13 @@ async function loadDbListPol() {
   if (!selectedPolRepoConfigId) {
     st.classList.remove('hidden');
     st.style.color = 'var(--fail)';
-    st.textContent = 'Step 4에서 두번째 Repo를 먼저 설정하세요.';
+    st.textContent = 'Step 4에서 추가 Repo를 먼저 설정해주세요.';
     return;
   }
   btn.disabled = true;
   st.classList.remove('hidden');
   st.style.color = 'var(--text2)';
-  st.innerHTML = '<span class="spinner"></span> 두번째 Repo APM_DB_INFO 조회 중...';
+  st.innerHTML = '<span class="spinner"></span> 추가 Repo APM_DB_INFO 조회 중...';
   try {
     const res = await fetch(`${API_RTS}/db-list-pol`, {
       method: 'POST',
@@ -1413,7 +1508,7 @@ function renderDbTable2(rows) {
     $('secondTargetSelectedInfo').innerHTML = `
       <span class="badge badge-disconnected">불일치</span>
       <span>현재 Target instance <span class="val">${escHtml(selectedRow.instance_name || '-')}</span> 이 선택한 PG Repo 목록에 없습니다.</span>
-      <span>PG Repo 대상: <span class="val">${escHtml(knownTargets)}</span></span>
+      <span>추가 Repo 대상: <span class="val">${escHtml(knownTargets)}</span></span>
     `;
   }
 }
@@ -1434,7 +1529,7 @@ function selectRow2(tr) {
   const isOracle2 = eng2 === 'oracle';
   const isPg2 = eng2 === 'postgresql' || eng2 === 'postgres';
 
-  // 두번째 Repo Oracle: db_id 자동 입력
+  // 추가 Repo Oracle: db_id 자동 입력
   if (isOracle2 || isPg2) {
     const inp = $('polRepoDbIdList');
     if (inp) {
@@ -1442,19 +1537,19 @@ function selectRow2(tr) {
       polRepoDbIdTouched = false;
     }
   }
-  // 두번째 Repo PG: schema_name(instance_name) 자동 입력
+  // 추가 Repo PostgreSQL: schema_name(instance_name) 자동 입력
   if (isPg2) {
     const inp = $('polRepoSchemaName');
     if (inp) inp.value = selectedRow2.instance_name || '';
   }
 
-  // 카드5 힌트 영역에 POL 선택값 표시 (읽기 전용 안내)
+  // 카드5 힌트 영역에 추가 Repo 선택값 표시
   const hint5 = $('repoStep5BranchHint');
   if (hint5) {
     if (isOracle2) {
-      hint5.innerHTML = `두번째 Repo = <b>Oracle</b> — 선택된 POL db_id: <b style="color:#1a73e8">${selectedRow2.db_id}</b> (카드4 자동 입력됨)`;
+      hint5.innerHTML = `추가 Repo = <b>Oracle</b> — 선택된 db_id: <b style="color:#1a73e8">${selectedRow2.db_id}</b> (Step 5 입력란에 반영됨)`;
     } else if (isPg2) {
-      hint5.innerHTML = `두번째 Repo = <b>PostgreSQL</b> — 선택된 POL schema_name: <b style="color:#1a73e8">${escHtml(selectedRow2.instance_name || '')}</b> (카드4 자동 입력됨)`;
+      hint5.innerHTML = `추가 Repo = <b>PostgreSQL</b> — 선택된 schema_name: <b style="color:#1a73e8">${escHtml(selectedRow2.instance_name || '')}</b> (Step 5 입력란에 반영됨)`;
     }
   }
 
@@ -1463,9 +1558,9 @@ function selectRow2(tr) {
     <span>db_id: <span class="val">${selectedRow2.db_id}</span></span>
     <span>instance: <span class="val">${escHtml(selectedRow2.instance_name || '-')}</span></span>
     <span>host: <span class="val">${escHtml(selectedRow2.host_ip || '-')}</span></span>
-    ${isOracle2 ? `<span>→ POL db_id: <span class="val">${selectedRow2.db_id}</span></span>` : ''}
-    ${isPg2 ? `<span>→ POL db_id: <span class="val">${selectedRow2.db_id}</span></span>` : ''}
-    ${isPg2 ? `<span>→ POL schema_name: <span class="val">${escHtml(selectedRow2.instance_name || '')}</span></span>` : ''}
+    ${isOracle2 ? `<span>→ 추가 Repo db_id: <span class="val">${selectedRow2.db_id}</span></span>` : ''}
+    ${isPg2 ? `<span>→ 추가 Repo db_id: <span class="val">${selectedRow2.db_id}</span></span>` : ''}
+    ${isPg2 ? `<span>→ 추가 Repo schema_name: <span class="val">${escHtml(selectedRow2.instance_name || '')}</span></span>` : ''}
   `;
 }
 
@@ -1555,18 +1650,18 @@ function renderDiscoverResult(data) {
 }
 
 async function runServiceDiscover() {
-  if (!selectedRow) throw new Error('Step 2?먯꽌 Target DB瑜?癒쇱? ?좏깮?댁＜?몄슂.');
+  if (!selectedRow) throw new Error('Step 2에서 Target DB를 먼저 선택해주세요.');
   const sshUser = $('sshUser').value.trim();
   const sshPassword = $('sshPassword').value;
   if (!sshUser || !sshPassword) {
-    throw new Error('Step 2??SSH User/Password瑜??낅젰?댁＜?몄슂.');
+    throw new Error('Step 2에서 SSH User / Password를 입력해주세요.');
   }
 
   const btn = $('btnDiscover');
   const st = $('discoverStatus');
   st.classList.remove('hidden');
   st.style.color = 'var(--text2)';
-  st.innerHTML = '<span class="spinner"></span> Discover 以?..';
+  st.innerHTML = '<span class="spinner"></span> Service Discover 실행 중...';
   btn.disabled = true;
 
   try {
@@ -2714,7 +2809,7 @@ function resetTargetDbArea() {
   $('targetPassword').value = '';
   $('targetSelectedInfo').innerHTML = '<span class="badge badge-disconnected">NO TARGET</span><span>Step 2에서 Target DB를 선택해주세요</span>';
   $('dbTable').innerHTML = '<tr><td colspan="8" class="empty">Repo DB 연결 후 목록을 조회하세요</td></tr>';
-  $('dbTable2').innerHTML = '<tr><td colspan="8" class="empty">Step 4에서 두번째 Repo를 설정 후 조회하세요</td></tr>';
+  $('dbTable2').innerHTML = '<tr><td colspan="8" class="empty">Step 4에서 추가 Repo를 설정한 뒤 조회하세요</td></tr>';
   if ($('discoverStatus')) $('discoverStatus').classList.add('hidden');
   if ($('discoverResult')) { $('discoverResult').classList.add('hidden'); $('discoverResult').innerHTML = ''; }
   if ($('secondTargetSelectedInfo')) $('secondTargetSelectedInfo').innerHTML = '<span class="badge badge-disconnected">미선택</span><span>아래 목록에서 Target을 선택하세요</span>';
@@ -2940,17 +3035,7 @@ $('btnRunRepoStep5').onclick = async () => {
     if (repoPartitionDate) body.repo_partition_date = repoPartitionDate;
     if (repoLoggingTime)   body.repo_logging_time   = repoLoggingTime;
     setRepoTableDownloadState(false);
-    if (selectedPolRepoConfigId) {
-      body.pol_repo_config_id = selectedPolRepoConfigId;
-      const polSchemaInputVal = ($('polRepoSchemaName')?.value || '').trim();
-      const polSchemaVal = polSchemaInputVal || String(selectedRow2?.instance_name || '').trim();
-      const polDbIdInputVal = ($('polRepoDbIdList')?.value || '').trim();
-      const polDbIdAutoVal = selectedRow2?.db_id ? String(selectedRow2.db_id) : '';
-      const polDbIdVal = (!polRepoDbIdTouched && polDbIdAutoVal) ? polDbIdAutoVal : (polDbIdInputVal || polDbIdAutoVal);
-      if (polSchemaVal) body.pol_repo_schema_name = polSchemaVal;
-      if (polDbIdVal)   body.pol_repo_db_id_list  = polDbIdVal;
-      if (!body.pol_repo_db_id_list) throw new Error('두번째 Repo Target을 먼저 선택하거나 POL db_id를 입력해주세요.');
-    }
+    body.repo_queries = buildRepoQueriesPayload();
     const res = await fetch(`${API_RTS}/run-repo-step5-job`, {
       method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)
     });
@@ -3054,445 +3139,374 @@ function aggregateSqlElapseRows(rows) {
   return { cnt: sumCnt, el: hasEl ? sumEl.toFixed(2) : '-', avg: (wMs / sumCnt).toFixed(2) };
 }
 
-function renderNewRepoResultGrid(json) {
-  const wrap = $('repoNewResultWrap');
-  const content = wrap || $('resultContent');
-  if (!wrap) { $('resultArea').classList.remove('hidden'); }
-  if (json.error || json.overall_status === 'error') {
+function getNormalizedRepoResults(d) {
+  const repoResults = Array.isArray(d.repo_results) ? d.repo_results.filter(Boolean) : [];
+  if (repoResults.length) return repoResults;
+
+  const legacy = [];
+  if ((d.repo_elapse_vsql || d.repo_stat_vsql || d.repo_engine || d.repo_error) !== undefined) {
+    legacy.push({
+      slot_id: 'repo_a',
+      slot_label: 'Repo A',
+      engine: d.repo_engine || '',
+      mode: d.repo_mode || 'vsql',
+      schema_name: d.repo_schema || '',
+      db_id_list: d.db_id_list || '',
+      elapse_rows: d.repo_elapse_vsql || d.repo_elapse || [],
+      stat_rows: d.repo_stat_vsql || d.repo_stat || [],
+      error: d.repo_error || '',
+    });
+  }
+  if ((d.repo_elapse_pol || d.repo_stat_pol || d.pol_repo_engine || d.pol_repo_error) !== undefined) {
+    legacy.push({
+      slot_id: 'repo_b',
+      slot_label: 'Repo B',
+      engine: d.pol_repo_engine || '',
+      mode: 'pol',
+      schema_name: d.pol_repo_schema || '',
+      db_id_list: d.pol_repo_db_id_list || '',
+      elapse_rows: d.repo_elapse_pol || [],
+      stat_rows: d.repo_stat_pol || [],
+      error: d.pol_repo_error || '',
+    });
+  }
+
+  return legacy.filter((item) => (
+    item.engine ||
+    item.error ||
+    (item.elapse_rows || []).length ||
+    (item.stat_rows || []).length
+  ));
+}
+
+function renderRepoResultsMatrix(content, d, repoResults) {
+  const tVsql = d.target_vsql || [];
+  const dynamicSigs = d.case_signatures || {};
+  const step5SqlIdByCase = d.step5_sql_id_per_case || {};
+  const cleanup = d.cleanup_info || '';
+  const loggingTimeTxt = d.logging_time || '-';
+  const partitionDateTxt = d.partition_date || '-';
+  const targetVsqlError = String(d.target_vsql_error || '').trim();
+  const activeSelectedRow = typeof selectedRow !== 'undefined' ? selectedRow : null;
+
+  const vsqlResults = repoResults.filter((item) => item && item.mode === 'vsql');
+  const polResults = repoResults.filter((item) => item && item.mode === 'pol');
+  const duplicateNotes = [];
+  if (vsqlResults.length > 1) duplicateNotes.push('VSQL 모드 Repo가 2개 이상 선택되어 첫 번째 VSQL Repo만 표에 표시했습니다.');
+  if (polResults.length > 1) duplicateNotes.push('POL 모드 Repo가 2개 이상 선택되어 첫 번째 POL Repo만 표에 표시했습니다.');
+
+  const activeChannels = [];
+  if (vsqlResults[0]) activeChannels.push({ key: 'vsql', label: 'VSQL_RTS', repo: vsqlResults[0] });
+  if (polResults[0]) activeChannels.push({ key: 'pol', label: 'POL_RTS', repo: polResults[0] });
+
+  if (!activeChannels.length) {
+    content.innerHTML = `<div class="step-card"><div class="evidence">선택한 Repo 모드가 없어 표시할 결과가 없습니다.</div></div>`;
     setRepoTableDownloadState(false);
-    content.innerHTML = `<div class="step-card"><div class="step-head"><span class="badge badge-error">ERROR</span></div><div class="evidence">${escHtml(json.error || 'Unknown Error')}</div></div>`;
     return;
   }
-  
-  const d = json.data || {};
-  const t_vsql = d.target_vsql || [];
-  // VSQL Repo (Oracle 모니터링 프로세스)
-  const r_elapse_vsql = d.repo_elapse_vsql || d.repo_elapse || [];
-  const r_stat_vsql   = d.repo_stat_vsql   || d.repo_stat   || [];
-  // POL Repo (PG 모니터링 프로세스)
-  const r_elapse_pol  = d.repo_elapse_pol  || [];
-  const r_stat_pol    = d.repo_stat_pol    || [];
-  // POL Repo가 실제로 조회됐는지 여부
-  const polQueried = d.pol_repo_engine !== undefined || d.pol_repo_error !== undefined;
-  const cleanup = d.cleanup_info || '';
-  const hasAnyElapse_vsql = r_elapse_vsql.length > 0;
-  const hasAnyStat_vsql   = r_stat_vsql.length > 0;
-  const hasAnyElapse_pol  = r_elapse_pol.length > 0;
-  const hasAnyStat_pol    = r_stat_pol.length > 0;
-  const hasAnyElapse = hasAnyElapse_vsql || hasAnyElapse_pol;
-  const hasAnyStat   = hasAnyStat_vsql   || hasAnyStat_pol;
 
-  const actualIds = d.case_actual_sql_ids || d.case_sql_ids || {};
-  const expectedIds = d.case_sql_ids_expected || {};
-  const dynamicSigs = d.case_signatures || {};
-  const caseExecDelta = d.case_exec_delta || {};
-  const step5SqlIdByCase = d.step5_sql_id_per_case || {};
-  const DEF_EXP = {
-    case2_proc1: "fbf2t9pw12ynm",
-    case3_proc2: "ga6tfrmnrzwax",
-    case4_proc3: "af5w9c5uq9mf5",
-    case5_proc4: "9yv10yjy19dva",
-    case6_proc5: "9t1uh0g3vjnd7",
-  };
-  const idCase2Proc1 = (expectedIds.case2_proc1 || DEF_EXP.case2_proc1).toLowerCase();
-  const idCase3Proc2 = (expectedIds.case3_proc2 || DEF_EXP.case3_proc2).toLowerCase();
-  const idCase4Proc3 = (expectedIds.case4_proc3 || DEF_EXP.case4_proc3).toLowerCase();
-  const idCase5Proc4 = (expectedIds.case5_proc4 || DEF_EXP.case5_proc4).toLowerCase();
-  const idCase6Proc5 = (expectedIds.case6_proc5 || DEF_EXP.case6_proc5).toLowerCase();
-  const idCase2Actual = (actualIds.case2_proc1 || idCase2Proc1).toLowerCase();
-  const idCase3Actual = (actualIds.case3_proc2 || idCase3Proc2).toLowerCase();
-  const idCase4Actual = (actualIds.case4_proc3 || idCase4Proc3).toLowerCase();
-  const idCase5Actual = (actualIds.case5_proc4 || idCase5Proc4).toLowerCase();
-  const idCase6Actual = (actualIds.case6_proc5 || idCase6Proc5).toLowerCase();
+  const caseDefs = [
+    {
+      key: 'case2_proc1',
+      caseLabel: 'CASE2',
+      testInfo: 'PLSQL 전문에 대한 XView & SQL STAT 정합성 확인',
+      queryLabel: '3초 동안 수행되는 프로시저 호출 쿼리',
+      procName: 'QS_SQL_TEST_PROC1',
+    },
+    {
+      key: 'case3_proc2',
+      caseLabel: 'CASE3',
+      testInfo: 'PLSQL 전문에 대한 XView & SQL STAT 정합성 확인',
+      queryLabel: '1초 동안 수행되는 프로시저 호출 쿼리',
+      procName: 'QS_SQL_TEST_PROC2',
+    },
+    {
+      key: 'case4_proc3',
+      caseLabel: 'CASE4',
+      testInfo: 'PLSQL 내부에서 호출되는 SQL 프로시저별 XView & SQL STAT 정합성 확인',
+      queryLabel: '0.05초 동안 수행되는 프로시저 호출 쿼리',
+      procName: 'QS_SQL_TEST_PROC3',
+    },
+    {
+      key: 'case5_proc4',
+      caseLabel: 'CASE5',
+      testInfo: 'PLSQL 내부에서 호출되는 SQL 프로시저별 XView & SQL STAT 정합성 확인',
+      queryLabel: '0.01초 동안 수행되는 프로시저 호출 쿼리',
+      procName: 'QS_SQL_TEST_PROC4',
+    },
+    {
+      key: 'case6_proc5',
+      caseLabel: 'CASE6',
+      testInfo: 'PLSQL 내부에서 호출되는 SQL 프로시저별 XView & SQL STAT 정합성 확인',
+      queryLabel: '0.001초 동안 수행되는 프로시저 호출 쿼리',
+      procName: 'QS_SQL_TEST_PROC5',
+    },
+  ];
 
-  const caseMeta = {
-    [idCase2Proc1]: { case: "Case 1", proc: "PLSQL 전문에 대한 XView & SQL STAT 방향성 확인", label: "3초 호출 쿼리" },
-    [idCase3Proc2]: { case: "Case 2", proc: "PLSQL 전문에 대한 XView & SQL STAT 방향성 확인", label: "1초 호출 쿼리" },
-    [idCase4Proc3]: { case: "Case 3", proc: "PLSQL 내부에서 호출되는 SQL 프로시저 별 XView & SQL STAT 방향성 확인", label: "0.05초 호출 쿼리" },
-    [idCase5Proc4]: { case: "Case 4", proc: "PLSQL 내부에서 호출되는 SQL 프로시저 별 XView & SQL STAT 방향성 확인", label: "0.01초 호출 쿼리" },
-    [idCase6Proc5]: { case: "Case 5", proc: "PLSQL 내부에서 호출되는 SQL 프로시저 별 XView & SQL STAT 방향성 확인", label: "0.001초 호출 쿼리" },
+  const formatNum = (value, digits = 2) => {
+    const num = Number(value);
+    return Number.isFinite(num) ? num.toFixed(digits) : '-';
   };
 
-  const targetRowById = {};
-  (t_vsql || []).forEach((r) => {
-    const sid = String(r.sql_id || '').toLowerCase();
-    if (sid) targetRowById[sid] = r;
-  });
-  const inferMetaFromTarget = (sid) => {
-    const r = targetRowById[String(sid || '').toLowerCase()];
-    const txt = String((r && r.sql_text) || '').toUpperCase();
-    if (!txt) return null;
-    if (txt.includes('BEGIN QS_SQL_TEST_PROC1')) {
-      return { case: "Case 1", proc: "qs_sql_test_proc1 호출 (3s)", label: "프로시저 호출 쿼리" };
-    }
-    if (txt.includes('BEGIN QS_SQL_TEST_PROC2')) {
-      return { case: "Case 2", proc: "qs_sql_test_proc2 호출 (1s)", label: "프로시저 호출 쿼리" };
-    }
-    if (txt.includes('BEGIN QS_SQL_TEST_PROC3')) {
-      return { case: "Case 3", proc: "qs_sql_test_proc3 호출 (0.05s)", label: "프로시저 호출 쿼리" };
-    }
-    if (txt.includes('BEGIN QS_SQL_TEST_PROC4')) {
-      return { case: "Case 4", proc: "qs_sql_test_proc4 호출 (0.01s)", label: "프로시저 호출 쿼리" };
-    }
-    if (txt.includes('BEGIN QS_SQL_TEST_PROC5')) {
-      return { case: "Case 5", proc: "qs_sql_test_proc5 호출 (0.001s)", label: "프로시저 호출 쿼리" };
-    }
-    return null;
+  const metricText = (value) => {
+    if (value === null || value === undefined || value === '') return '-';
+    return String(value);
   };
 
-  const wantedOrder = [idCase2Proc1, idCase3Proc2, idCase4Proc3, idCase5Proc4, idCase6Proc5];
-  const idsToRender = [...wantedOrder];
+  const describeRepo = (repo) => {
+    if (!repo) return '미선택';
+    const pieces = [];
+    const engine = String(repo.engine || '-').toLowerCase();
+    const mode = String(repo.mode || '-').toLowerCase();
+    pieces.push(engine);
+    pieces.push(mode);
+    if (engine === 'oracle') {
+      if (repo.db_id_list) pieces.push(`db_id:${repo.db_id_list}`);
+    } else if (engine === 'postgresql' || engine === 'postgres') {
+      if (repo.schema_name) pieces.push(`schema:${repo.schema_name}`);
+    } else {
+      if (repo.schema_name) pieces.push(`schema:${repo.schema_name}`);
+      if (repo.db_id_list) pieces.push(`db_id:${repo.db_id_list}`);
+    }
+    return pieces.join(' / ');
+  };
 
-  const grouped = {};
-  idsToRender.forEach((id) => {
-    const meta = caseMeta[id] || inferMetaFromTarget(id) || { case: "Case ?", proc: "Detected from query result", label: "Detected SQL" };
-    if (!grouped[meta.case]) grouped[meta.case] = { case: meta.case, proc: meta.proc, items: [] };
-    let sig = null;
-    if (id === idCase2Proc1) sig = dynamicSigs.case2_proc1 || null;
-    else if (id === idCase3Proc2) sig = dynamicSigs.case3_proc2 || null;
-    else if (id === idCase4Proc3) sig = dynamicSigs.case4_proc3 || null;
-    else if (id === idCase5Proc4) sig = dynamicSigs.case5_proc4 || null;
-    else if (id === idCase6Proc5) sig = dynamicSigs.case6_proc5 || null;
-    let actualId = id;
-    if (id === idCase2Proc1) actualId = idCase2Actual;
-    else if (id === idCase3Proc2) actualId = idCase3Actual;
-    else if (id === idCase4Proc3) actualId = idCase4Actual;
-    else if (id === idCase5Proc4) actualId = idCase5Actual;
-    else if (id === idCase6Proc5) actualId = idCase6Actual;
-    const ck =
-        id === idCase2Proc1 ? 'case2_proc1' :
-        id === idCase3Proc2 ? 'case3_proc2' :
-        id === idCase4Proc3 ? 'case4_proc3' :
-        id === idCase5Proc4 ? 'case5_proc4' :
-        id === idCase6Proc5 ? 'case6_proc5' : '';
-    const step5SqlId = normalizeStr(step5SqlIdByCase[ck] || actualId || id) || '';
-    grouped[meta.case].items.push({
-      label: `${meta.label}\n(Step5 sql_id : ${step5SqlId})`,
-      id,
-      actualId,
-      step5SqlId,
-      sig,
-      caseKey: ck
-    });
-  });
-  const sqls = Object.values(grouped);
+  const buildChannelMetrics = (repo, sig, step5SqlId) => {
+    if (!repo) {
+      return {
+        xview: { count: '-', elapsed: '-', avg: '-' },
+        stat: { count: '-', elapsed: '-', per: '-' },
+      };
+    }
+
+    if (repo.error) {
+      return {
+        xview: { count: 'ERR', elapsed: 'ERR', avg: 'ERR' },
+        stat: { count: 'ERR', elapsed: 'ERR', per: 'ERR' },
+      };
+    }
+
+    const elapseRows = rowsByStep5SqlId(repo.elapse_rows || [], sig, step5SqlId);
+    const elapseAgg = aggregateSqlElapseRows(elapseRows);
+    const statRows = rowsByStep5SqlId(repo.stat_rows || [], sig, step5SqlId);
+    const statAgg = aggregateSqlStat10MinRows(statRows);
+
+    let xviewCount = elapseAgg.cnt;
+    let xviewElapsed = elapseAgg.el;
+    let xviewAvg = elapseAgg.avg;
+    let statCount = statAgg.cnt;
+    let statElapsed = statAgg.el;
+    let statPer = statAgg.per;
+
+    const hasAnyElapse = (repo.elapse_rows || []).length > 0;
+    const hasAnyStat = (repo.stat_rows || []).length > 0;
+    const statPerNum = Number(statPer);
+
+    if ((xviewCount === '-' || xviewCount === null) && Number.isFinite(statPerNum) && statPerNum > 0 && statPerNum < 1) {
+      xviewCount = '미수집(<1s)';
+    }
+    if ((xviewAvg === '-' || xviewAvg === null) && Number.isFinite(statPerNum) && statPerNum > 0 && statPerNum < 1) {
+      xviewAvg = '미수집(<1s)';
+    }
+    if ((xviewCount === '-' || xviewCount === null) && hasAnyElapse) {
+      xviewCount = '미매칭';
+    }
+    if ((xviewAvg === '-' || xviewAvg === null) && hasAnyElapse) {
+      xviewAvg = '미매칭';
+    }
+    if ((statCount === '-' || statCount === null) && hasAnyStat) statCount = '미매칭';
+    if ((statElapsed === '-' || statElapsed === null) && hasAnyStat) statElapsed = '미매칭';
+    if ((statPer === '-' || statPer === null) && hasAnyStat) statPer = '미매칭';
+
+    return {
+      xview: {
+        count: metricText(xviewCount),
+        elapsed: metricText(xviewElapsed),
+        avg: metricText(xviewAvg),
+      },
+      stat: {
+        count: metricText(statCount),
+        elapsed: metricText(statElapsed),
+        per: metricText(statPer),
+      },
+    };
+  };
+
+  const buildMetricCellHtml = (label, value, extraStyle = '') => `
+          <td style="border:1px solid #ccc; padding:4px 8px;">${label}</td>
+          <td style="border:1px solid #ccc; text-align:right; padding:4px 8px; ${extraStyle}">${escHtml(metricText(value))}</td>
+  `;
+
+  const xviewGroupColspan = activeChannels.length * 2;
+  const statGroupColspan = activeChannels.length * 2;
+  const channelHeaderHtml = activeChannels.map((channel) => `
+            <th colspan="2" style="border:1px solid #ccc; padding:4px; text-align:center;">${channel.label}</th>
+  `).join('');
+  const dataValueHeaderHtml = `
+            <th style="border:1px solid #ccc; padding:6px; text-align:center; min-width:140px;">DATA</th>
+            <th style="border:1px solid #ccc; padding:6px; text-align:center; min-width:80px;">VALUE</th>
+  `.repeat(1 + activeChannels.length + activeChannels.length);
 
   let rowsHtml = '';
-  let rowsHtmlExport = '';
-  sqls.forEach((c) => {
-    let caseRowSpan = c.items.length * 3;
-    let isFirstInCase = true;
-    
-    c.items.forEach((s) => {
-      // Target DB (v$sql)
-      const tRows = rowsByStep5SqlId(t_vsql, s.sig, s.step5SqlId);
-      const tRow = tRows.length ? tRows[tRows.length - 1] : null;
-      let t_exec = tRow ? (tRow.executions ?? '-') : '-';
-      const deltaExec = Number(caseExecDelta[s.caseKey] ?? 0);
-      const isCase1 = false; // case1_plsql 제거됨
-      let t_el = tRow ? (tRow.elapsed_time_s ?? tRow.elapsed_us_to_sec ?? null) : null; t_el = t_el != null ? parseFloat(t_el).toFixed(2) : '-';
-      let t_per = tRow ? tRow.per_elapse_sec : null; t_per = t_per != null ? parseFloat(t_per).toFixed(4) : '-';
-      
-      // ── VSQL Repo (ORA_SQL_ELAPSE) ──
-      const reRows_vsql = rowsByStep5SqlId(r_elapse_vsql, s.sig, s.step5SqlId);
-      const reAgg_vsql  = aggregateSqlElapseRows(reRows_vsql);
-      let re_cnt_vsql = reAgg_vsql.cnt;
-      let re_el_vsql  = reAgg_vsql.el;
-      let re_avg_vsql = reAgg_vsql.avg;
+  caseDefs.forEach((def) => {
+    const step5SqlId = String(step5SqlIdByCase[def.key] || '').trim();
+    const sig = dynamicSigs[def.key] || null;
+    const targetRows = rowsByStep5SqlId(tVsql, sig, step5SqlId);
+    const targetRow = targetRows[targetRows.length - 1] || null;
+    const targetExec = targetRow ? metricText(targetRow.executions ?? '-') : (targetVsqlError ? 'ERR' : '-');
+    const targetElapsed = targetRow ? formatNum(targetRow.elapsed_time_s ?? targetRow.elapsed_us_to_sec, 2) : (targetVsqlError ? 'ERR' : '-');
+    const targetPer = targetRow ? formatNum(targetRow.per_elapse_sec, 4) : (targetVsqlError ? 'ERR' : '-');
+    const channelMetrics = activeChannels.map((channel) => buildChannelMetrics(channel.repo, sig, step5SqlId));
 
-      // ── VSQL Repo (ORA_SQL_STAT_10MIN) ──
-      const rsRows_vsql = rowsByStep5SqlId(r_stat_vsql, s.sig, s.step5SqlId);
-      const rsAgg_vsql  = aggregateSqlStat10MinRows(rsRows_vsql);
-      let rs_cnt_vsql = rsAgg_vsql.cnt;
-      let rs_el_vsql  = rsAgg_vsql.el;
-      let rs_per_vsql = rsAgg_vsql.per;
+    const xviewRow1 = channelMetrics.map((metric) => buildMetricCellHtml('로깅 횟수', metric.xview.count, 'color:#d93025; font-weight:bold;')).join('');
+    const xviewRow2 = channelMetrics.map((metric) => buildMetricCellHtml('Elapsed Time (Sec)', metric.xview.elapsed)).join('');
+    const xviewRow3 = channelMetrics.map((metric) => buildMetricCellHtml('로깅 1회당 Elapse 평균', metric.xview.avg, 'color:#d93025; font-weight:bold;')).join('');
+    const statRow1 = channelMetrics.map((metric) => buildMetricCellHtml('Execution Count', metric.stat.count, 'color:#1a73e8; font-weight:bold;')).join('');
+    const statRow2 = channelMetrics.map((metric) => buildMetricCellHtml('Elapsed Time (Sec)', metric.stat.elapsed)).join('');
+    const statRow3 = channelMetrics.map((metric) => buildMetricCellHtml('Elapsed Time / Executions (Sec)', metric.stat.per)).join('');
 
-      // ── POL Repo (ORA_SQL_ELAPSE) ──
-      const reRows_pol = rowsByStep5SqlId(r_elapse_pol, s.sig, s.step5SqlId);
-      const reAgg_pol  = aggregateSqlElapseRows(reRows_pol);
-      let re_cnt_pol = reAgg_pol.cnt;
-      let re_el_pol_elapse = reAgg_pol.el;
-      let re_avg_pol = reAgg_pol.avg;
+    rowsHtml += `
+      <tr style="background:#fff; color:#333;">
+        <td rowspan="3" style="font-weight:600; border:1px solid #ccc; padding:8px; text-align:center;">${escHtml(def.caseLabel)}</td>
+        <td rowspan="3" style="border:1px solid #ccc; padding:8px; white-space:pre-wrap;">${escHtml(def.testInfo)}</td>
+        <td rowspan="3" style="border:1px solid #ccc; padding:8px; white-space:pre-wrap; vertical-align:top;">${escHtml(`${def.queryLabel}\n(${def.procName})\n(SQL_ID : ${step5SqlId || '-'})`)}</td>
 
-      // ── POL Repo (ORA_SQL_STAT_10MIN) ──
-      const rsRows_pol = rowsByStep5SqlId(r_stat_pol, s.sig, s.step5SqlId);
-      const rsAgg_pol  = aggregateSqlStat10MinRows(rsRows_pol);
-      let rs_cnt_pol = rsAgg_pol.cnt;
-      let rs_el_pol  = rsAgg_pol.el;
-      let rs_per_pol = rsAgg_pol.per;
+        <td style="border:1px solid #ccc; padding:4px 8px;">Executions</td>
+        <td style="border:1px solid #ccc; text-align:right; padding:4px 8px;">${escHtml(targetExec)}</td>
 
-      // ── VSQL 폴백 처리 ──
-      const rsPerNum_vsql = Number(rs_per_vsql);
-      if ((re_cnt_vsql === '-' || re_cnt_vsql === null) && Number.isFinite(rsPerNum_vsql) && rsPerNum_vsql > 0 && rsPerNum_vsql < 1) {
-        re_cnt_vsql = '미수집(<1s)';
-      }
-      if ((re_avg_vsql === '-' || re_avg_vsql === null) && Number.isFinite(rsPerNum_vsql) && rsPerNum_vsql > 0 && rsPerNum_vsql < 1) {
-        re_avg_vsql = '미수집(<1s)';
-      }
-      if ((re_cnt_vsql === '-' || re_cnt_vsql === null) && hasAnyElapse_vsql) {
-        re_cnt_vsql = isCase1 && Number.isFinite(deltaExec) && deltaExec > 0 ? '실행시점차이' : '미매칭';
-      }
-      if ((re_avg_vsql === '-' || re_avg_vsql === null) && hasAnyElapse_vsql) {
-        re_avg_vsql = isCase1 && Number.isFinite(deltaExec) && deltaExec > 0 ? '실행시점차이' : '미매칭';
-      }
-      if ((rs_cnt_vsql === '-' || rs_cnt_vsql === null) && hasAnyStat_vsql) rs_cnt_vsql = '미매칭';
-      if ((rs_el_vsql  === '-' || rs_el_vsql  === null) && hasAnyStat_vsql) rs_el_vsql  = '미매칭';
-      if ((rs_per_vsql === '-' || rs_per_vsql === null) && hasAnyStat_vsql) rs_per_vsql = '미매칭';
+        ${xviewRow1}
+        ${statRow1}
+      </tr>
+      <tr style="background:#fff; color:#333;">
+        <td style="border:1px solid #ccc; padding:4px 8px;">Elapsed Time (Sec)</td>
+        <td style="border:1px solid #ccc; text-align:right; padding:4px 8px;">${escHtml(metricText(targetElapsed))}</td>
 
-      // ── POL 폴백 처리 (POL Repo가 실제로 조회된 경우에만 미매칭 표시) ──
-      const rsPerNum_pol = Number(rs_per_pol);
-      if ((re_cnt_pol === '-' || re_cnt_pol === null) && Number.isFinite(rsPerNum_pol) && rsPerNum_pol > 0 && rsPerNum_pol < 1) {
-        re_cnt_pol = '미수집(<1s)';
-      }
-      if ((re_avg_pol === '-' || re_avg_pol === null) && Number.isFinite(rsPerNum_pol) && rsPerNum_pol > 0 && rsPerNum_pol < 1) {
-        re_avg_pol = '미수집(<1s)';
-      }
-      if (polQueried) {
-        if ((re_cnt_pol === '-' || re_cnt_pol === null) && hasAnyElapse_pol) {
-          re_cnt_pol = isCase1 && Number.isFinite(deltaExec) && deltaExec > 0 ? '실행시점차이' : '미매칭';
-        }
-        if ((re_avg_pol === '-' || re_avg_pol === null) && hasAnyElapse_pol) {
-          re_avg_pol = isCase1 && Number.isFinite(deltaExec) && deltaExec > 0 ? '실행시점차이' : '미매칭';
-        }
-        if ((rs_cnt_pol === '-' || rs_cnt_pol === null) && hasAnyStat_pol) rs_cnt_pol = '미매칭';
-        if ((rs_el_pol  === '-' || rs_el_pol  === null) && hasAnyStat_pol) rs_el_pol  = '미매칭';
-        if ((rs_per_pol === '-' || rs_per_pol === null) && hasAnyStat_pol) rs_per_pol = '미매칭';
-      }
+        ${xviewRow2}
+        ${statRow2}
+      </tr>
+      <tr style="background:#fff; color:#333;">
+        <td style="border:1px solid #ccc; padding:4px 8px;">Elapsed Time / Executions (Sec)</td>
+        <td style="border:1px solid #ccc; text-align:right; padding:4px 8px;">${escHtml(metricText(targetPer))}</td>
 
-      let caseAndProcHtml = isFirstInCase ? `
-        <td rowspan="${caseRowSpan}" style="font-weight:600; border:1px solid #ccc; padding:8px; text-align:center;">${c.case}</td>
-        <td rowspan="${caseRowSpan}" style="border:1px solid #ccc; padding:8px; white-space:pre-wrap;">${c.proc}</td>
-      ` : ``;
-
-      rowsHtml += `
-        <tr style="background:#fff; color:#333;">
-          ${caseAndProcHtml}
-          <td rowspan="3" style="border:1px solid #ccc; padding:8px; white-space:pre-wrap; vertical-align:top;">${s.label}</td>
-          
-          <td style="border:1px solid #ccc; padding:4px 8px;">Executions</td>
-          <td style="border:1px solid #ccc; text-align:right; padding:4px 8px;">${t_exec}</td>
-          
-          <td style="border:1px solid #ccc; padding:4px 8px;">로깅 횟수</td>
-          <td style="border:1px solid #ccc; text-align:right; padding:4px 8px; color:#d93025; font-weight:bold;">${re_cnt_vsql}</td>
-          <td style="border:1px solid #ccc; padding:4px 8px;">로깅 횟수</td>
-          <td style="border:1px solid #ccc; text-align:right; padding:4px 8px; color:#d93025; font-weight:bold;">${re_cnt_pol}</td>
-
-          <td style="border:1px solid #ccc; padding:4px 8px;">Execution Count</td>
-          <td style="border:1px solid #ccc; text-align:right; padding:4px 8px; color:#1a73e8; font-weight:bold;">${rs_cnt_vsql}</td>
-          <td style="border:1px solid #ccc; padding:4px 8px;">Execution Count</td>
-          <td style="border:1px solid #ccc; text-align:right; padding:4px 8px; color:#1a73e8; font-weight:bold;">${rs_cnt_pol}</td>
-        </tr>
-        <tr style="background:#fff; color:#333;">
-          <td style="border:1px solid #ccc; padding:4px 8px;">Elapsed Time (Sec)</td>
-          <td style="border:1px solid #ccc; text-align:right; padding:4px 8px;">${t_el}</td>
-
-          <td style="border:1px solid #ccc; padding:4px 8px;">Elapsed Time (Sec)</td>
-          <td style="border:1px solid #ccc; text-align:right; padding:4px 8px;">${re_el_vsql}</td>
-          <td style="border:1px solid #ccc; padding:4px 8px;">Elapsed Time (Sec)</td>
-          <td style="border:1px solid #ccc; text-align:right; padding:4px 8px;">${re_el_pol_elapse}</td>
-
-          <td style="border:1px solid #ccc; padding:4px 8px;">Elapsed Time (Sec)</td>
-          <td style="border:1px solid #ccc; text-align:right; padding:4px 8px;">${rs_el_vsql}</td>
-          <td style="border:1px solid #ccc; padding:4px 8px;">Elapsed Time (Sec)</td>
-          <td style="border:1px solid #ccc; text-align:right; padding:4px 8px;">${rs_el_pol}</td>
-        </tr>
-        <tr style="background:#fff; color:#333;">
-          <td style="border:1px solid #ccc; padding:4px 8px;">Elapsed Time / Executions (Sec)</td>
-          <td style="border:1px solid #ccc; text-align:right; padding:4px 8px;">${t_per}</td>
-
-          <td style="border:1px solid #ccc; padding:4px 8px;">로깅 1회당 Elapse 평균</td>
-          <td style="border:1px solid #ccc; text-align:right; padding:4px 8px; color:#d93025; font-weight:bold;">${re_avg_vsql}</td>
-          <td style="border:1px solid #ccc; padding:4px 8px;">로깅 1회당 Elapse 평균</td>
-          <td style="border:1px solid #ccc; text-align:right; padding:4px 8px; color:#d93025; font-weight:bold;">${re_avg_pol}</td>
-
-          <td style="border:1px solid #ccc; padding:4px 8px;">Elapsed Time / Executions (Sec)</td>
-          <td style="border:1px solid #ccc; text-align:right; padding:4px 8px;">${rs_per_vsql}</td>
-          <td style="border:1px solid #ccc; padding:4px 8px;">Elapsed Time / Executions (Sec)</td>
-          <td style="border:1px solid #ccc; text-align:right; padding:4px 8px;">${rs_per_pol}</td>
-        </tr>
-      `;
-
-      rowsHtmlExport += `
-        <tr style="background:#fff; color:#333;">
-          <td style="font-weight:600; border:1px solid #ccc; border-bottom:none; padding:8px; text-align:center; vertical-align:top;">${c.case}</td>
-          <td style="border:1px solid #ccc; border-bottom:none; padding:8px; white-space:pre-wrap; vertical-align:top;">${c.proc}</td>
-          <td style="border:1px solid #ccc; border-bottom:none; padding:8px; white-space:pre-wrap; vertical-align:top;">${s.label}</td>
-          <td style="border:1px solid #ccc; padding:4px 8px;">Executions</td>
-          <td style="border:1px solid #ccc; text-align:right; padding:4px 8px;">${t_exec}</td>
-          <td style="border:1px solid #ccc; padding:4px 8px;">濡쒓퉭 ?잛닔</td>
-          <td style="border:1px solid #ccc; text-align:right; padding:4px 8px; color:#d93025; font-weight:bold;">${re_cnt_vsql}</td>
-          <td style="border:1px solid #ccc; padding:4px 8px;">濡쒓퉭 ?잛닔</td>
-          <td style="border:1px solid #ccc; text-align:right; padding:4px 8px; color:#d93025; font-weight:bold;">${re_cnt_pol}</td>
-          <td style="border:1px solid #ccc; padding:4px 8px;">Execution Count</td>
-          <td style="border:1px solid #ccc; text-align:right; padding:4px 8px; color:#1a73e8; font-weight:bold;">${rs_cnt_vsql}</td>
-          <td style="border:1px solid #ccc; padding:4px 8px;">Execution Count</td>
-          <td style="border:1px solid #ccc; text-align:right; padding:4px 8px; color:#1a73e8; font-weight:bold;">${rs_cnt_pol}</td>
-        </tr>
-        <tr style="background:#fff; color:#333;">
-          <td style="border-left:1px solid #ccc; border-right:1px solid #ccc; border-top:none; border-bottom:1px solid #ccc; padding:8px;"></td>
-          <td style="border-left:1px solid #ccc; border-right:1px solid #ccc; border-top:none; border-bottom:1px solid #ccc; padding:8px;"></td>
-          <td style="border-left:1px solid #ccc; border-right:1px solid #ccc; border-top:none; border-bottom:1px solid #ccc; padding:8px;"></td>
-          <td style="border:1px solid #ccc; padding:4px 8px;">Elapsed Time (Sec)</td>
-          <td style="border:1px solid #ccc; text-align:right; padding:4px 8px;">${t_el}</td>
-          <td style="border:1px solid #ccc; padding:4px 8px;">Elapsed Time (Sec)</td>
-          <td style="border:1px solid #ccc; text-align:right; padding:4px 8px;">${re_el_vsql}</td>
-          <td style="border:1px solid #ccc; padding:4px 8px;">Elapsed Time (Sec)</td>
-          <td style="border:1px solid #ccc; text-align:right; padding:4px 8px;">${re_el_pol_elapse}</td>
-          <td style="border:1px solid #ccc; padding:4px 8px;">Elapsed Time (Sec)</td>
-          <td style="border:1px solid #ccc; text-align:right; padding:4px 8px;">${rs_el_vsql}</td>
-          <td style="border:1px solid #ccc; padding:4px 8px;">Elapsed Time (Sec)</td>
-          <td style="border:1px solid #ccc; text-align:right; padding:4px 8px;">${rs_el_pol}</td>
-        </tr>
-        <tr style="background:#fff; color:#333;">
-          <td style="border:1px solid #ccc; padding:8px;"></td>
-          <td style="border:1px solid #ccc; padding:8px;"></td>
-          <td style="border:1px solid #ccc; padding:8px;"></td>
-          <td style="border:1px solid #ccc; padding:4px 8px;">Elapsed Time / Executions (Sec)</td>
-          <td style="border:1px solid #ccc; text-align:right; padding:4px 8px;">${t_per}</td>
-          <td style="border:1px solid #ccc; padding:4px 8px;">濡쒓퉭 1?뚮떦 Elapse ?됯퇏</td>
-          <td style="border:1px solid #ccc; text-align:right; padding:4px 8px; color:#d93025; font-weight:bold;">${re_avg_vsql}</td>
-          <td style="border:1px solid #ccc; padding:4px 8px;">濡쒓퉭 1?뚮떦 Elapse ?됯퇏</td>
-          <td style="border:1px solid #ccc; text-align:right; padding:4px 8px; color:#d93025; font-weight:bold;">${re_avg_pol}</td>
-          <td style="border:1px solid #ccc; padding:4px 8px;">Elapsed Time / Executions (Sec)</td>
-          <td style="border:1px solid #ccc; text-align:right; padding:4px 8px;">${rs_per_vsql}</td>
-          <td style="border:1px solid #ccc; padding:4px 8px;">Elapsed Time / Executions (Sec)</td>
-          <td style="border:1px solid #ccc; text-align:right; padding:4px 8px;">${rs_per_pol}</td>
-        </tr>
-      `;
-      isFirstInCase = false;
-    });
+        ${xviewRow3}
+        ${statRow3}
+      </tr>
+    `;
   });
 
-  const vsqlRepoTxt = `${(d.repo_engine || 'repo').toUpperCase()}${d.repo_schema ? `/${d.repo_schema}` : ''}`;
-  const polRepoTxt = d.pol_repo_engine
-    ? `${d.pol_repo_engine.toUpperCase()}${d.pol_repo_schema ? `/${d.pol_repo_schema}` : ''}`
-    : (d.pol_repo_error ? `오류: ${d.pol_repo_error}` : '미선택');
-  const targetTxt = selectedRow ? `${selectedRow.instance_name || selectedRow.instance || '-'} (DB_ID: ${selectedRow.db_id}, Host: ${selectedRow.host_ip})` : '알 수 없음';
-  const loggingTimeTxt = d.logging_time ? escHtml(d.logging_time) : '-';
-  const partitionDateTxt = d.partition_date ? escHtml(d.partition_date) : '-';
+  const repoErrorNotes = activeChannels
+    .filter((channel) => channel.repo && channel.repo.error)
+    .map((channel) => `[${channel.label}] ${channel.repo.error}`);
+  if (targetVsqlError) {
+    repoErrorNotes.unshift(`[Target V$SQL] ${targetVsqlError}`);
+  }
+
+  const targetTxt = activeSelectedRow
+    ? `${activeSelectedRow.instance_name || activeSelectedRow.instance || '-'} (DB_ID: ${activeSelectedRow.db_id}, Host: ${activeSelectedRow.host_ip})`
+    : (d.db_id_list || '-');
+
+  const bannerParts = [];
+  if (vsqlResults[0]) {
+    bannerParts.push(`<span style="color:#1a73e8; margin-right:5px;">[VSQL Repo]</span><span style="font-weight:normal; margin-right:20px;">${escHtml(describeRepo(vsqlResults[0]))}</span>`);
+  }
+  if (polResults[0]) {
+    bannerParts.push(`<span style="color:#d93025; margin-right:5px;">[POL Repo]</span><span style="font-weight:normal; margin-right:20px;">${escHtml(describeRepo(polResults[0]))}</span>`);
+  }
+  bannerParts.push(`<span style="color:#1a73e8; margin-right:5px;">[Target DB]</span><span style="font-weight:normal; margin-right:20px;">${escHtml(targetTxt)}</span>`);
+  bannerParts.push(`<span style="color:#555; margin-right:5px;">[조회 기준 시각]</span><span style="font-weight:normal; color:#e65100;">${escHtml(loggingTimeTxt)}</span>`);
+  bannerParts.push(`<span style="color:#555; margin-left:16px; margin-right:5px;">[Partition Date]</span><span style="font-weight:normal; color:#e65100;">${escHtml(partitionDateTxt)}</span>`);
+
+  const noteLines = [...duplicateNotes, ...repoErrorNotes];
+  const noteHtml = noteLines.length
+    ? `<div style="margin-top:8px; font-size:12px; color:#b45309;">${noteLines.map((note) => escHtml(note)).join('<br>')}</div>`
+    : '';
+  const bannerHtml = `
+    <div style="margin-bottom:10px; font-size:14px; font-weight:bold; background:#e3f2fd; padding:10px; border-radius:4px; border-left:4px solid #1a73e8; color:#333;">
+      ${bannerParts.join('')}
+      ${noteHtml}
+    </div>
+  `;
+
   const exportFilename = [
-    'repo_step5',
-    selectedRow?.instance_name || selectedRow?.instance || selectedRow?.db_id || 'target',
-    d.logging_time || d.partition_date || new Date().toISOString().slice(0, 19),
+    'repo-report',
+    activeChannels.map((channel) => channel.key).join('_') || 'single',
+    activeSelectedRow?.instance_name || activeSelectedRow?.instance || activeSelectedRow?.db_id || 'target',
+    partitionDateTxt || 'partition',
   ].join('_');
-  const infoBannerHtml = `
-    <div style="margin-bottom: 10px; font-size: 14px; font-weight: bold; background: #e3f2fd; padding: 10px; border-radius: 4px; border-left: 4px solid #1a73e8; color: #333;">
-      <span style="color: #1a73e8; margin-right: 5px;">[VSQL Repo]</span> <span style="font-weight: normal; margin-right: 20px;">${escHtml(vsqlRepoTxt)}</span>
-      <span style="color: #d93025; margin-right: 5px;">[POL Repo]</span> <span style="font-weight: normal; margin-right: 20px;">${escHtml(polRepoTxt)}</span>
-      <span style="color: #1a73e8; margin-right: 5px;">[Target DB]</span> <span style="font-weight: normal; margin-right: 20px;">${escHtml(targetTxt)}</span>
-      <span style="color: #555; margin-right: 5px;">[議고쉶 湲곗? ?쒓컖]</span> <span style="font-weight: normal; color: #e65100;">${loggingTimeTxt}</span>
-      <span style="color: #555; margin-left: 16px; margin-right: 5px;">[Partition Date]</span> <span style="font-weight: normal; color: #e65100;">${partitionDateTxt}</span>
+  const minTableWidth = `${960 + (activeChannels.length * 440)}px`;
+
+  const tableHtml = `
+    <div id="repoTableDisplayTarget" style="font-size:12px; margin-bottom:20px; font-family:-apple-system, sans-serif; overflow-x:auto;">
+      ${bannerHtml}
+      <div style="min-width:${minTableWidth};">
+        <table style="width:100%; border-collapse:collapse; text-align:left; border:1px solid #ccc; background:#fff;">
+          <thead>
+            <tr style="background:#f7f7f7; color:#b91c1c; font-weight:700;">
+              <th colspan="3" style="border:1px solid #ccc; padding:4px; text-align:center;"></th>
+              <th colspan="2" style="border:1px solid #ccc; padding:4px; text-align:center;">기대 결과</th>
+              <th colspan="${xviewGroupColspan}" style="border:1px solid #ccc; padding:4px; text-align:center;">XView 방향성 검증</th>
+              <th colspan="${statGroupColspan}" style="border:1px solid #ccc; padding:4px; text-align:center;">SQL_STAT 방향성 검증</th>
+            </tr>
+            <tr style="background:#0a4c5a; color:white;">
+              <th rowspan="3" style="border:1px solid #ccc; padding:10px; text-align:center; min-width:90px;">Test Case</th>
+              <th rowspan="3" style="border:1px solid #ccc; padding:10px; text-align:center; min-width:280px;">Test Info</th>
+              <th rowspan="3" style="border:1px solid #ccc; padding:10px; text-align:center; min-width:260px;">검증 대상 쿼리</th>
+              <th colspan="2" rowspan="2" style="border:1px solid #ccc; padding:10px; text-align:center;">Target DB &gt; V$SQL</th>
+              <th colspan="${xviewGroupColspan}" style="border:1px solid #ccc; padding:4px; text-align:center;">Repo DB &gt; ORA_SQL_ELAPSE</th>
+              <th colspan="${statGroupColspan}" style="border:1px solid #ccc; padding:4px; text-align:center;">Repo DB &gt; ORA_SQL_STAT_10MIN</th>
+            </tr>
+            <tr style="background:#0a4c5a; color:white;">
+              ${channelHeaderHtml}
+              ${channelHeaderHtml}
+            </tr>
+            <tr style="background:#0a4c5a; color:white;">
+              ${dataValueHeaderHtml}
+            </tr>
+          </thead>
+          <tbody>${rowsHtml}</tbody>
+        </table>
+      </div>
+      <div style="margin-top:14px; padding:12px; background:var(--theme-panel-alt-bg); border:1px dashed #ccc; border-radius:6px;">
+        <strong>Cleanup Log:</strong> <span style="font-family:monospace; margin-left:8px;">${escHtml(cleanup)}</span>
+      </div>
+    </div>
+    <div id="repoTableExportTarget" style="position:fixed; left:-100000px; top:0; z-index:-1; width:max-content; max-width:none; font-size:12px; font-family:-apple-system, sans-serif; background:#ffffff; color:#333; overflow:visible; padding:0; margin:0;">
+      ${bannerHtml}
+      <div style="min-width:${minTableWidth}; width:max-content;">
+        <table style="width:100%; border-collapse:collapse; text-align:left; border:1px solid #ccc; background:#fff;">
+          <thead>
+            <tr style="background:#f7f7f7; color:#b91c1c; font-weight:700;">
+              <th colspan="3" style="border:1px solid #ccc; padding:4px; text-align:center;"></th>
+              <th colspan="2" style="border:1px solid #ccc; padding:4px; text-align:center;">기대 결과</th>
+              <th colspan="${xviewGroupColspan}" style="border:1px solid #ccc; padding:4px; text-align:center;">XView 방향성 검증</th>
+              <th colspan="${statGroupColspan}" style="border:1px solid #ccc; padding:4px; text-align:center;">SQL_STAT 방향성 검증</th>
+            </tr>
+            <tr style="background:#0a4c5a; color:white;">
+              <th rowspan="3" style="border:1px solid #ccc; padding:10px; text-align:center; min-width:90px;">Test Case</th>
+              <th rowspan="3" style="border:1px solid #ccc; padding:10px; text-align:center; min-width:280px;">Test Info</th>
+              <th rowspan="3" style="border:1px solid #ccc; padding:10px; text-align:center; min-width:260px;">검증 대상 쿼리</th>
+              <th colspan="2" rowspan="2" style="border:1px solid #ccc; padding:10px; text-align:center;">Target DB &gt; V$SQL</th>
+              <th colspan="${xviewGroupColspan}" style="border:1px solid #ccc; padding:4px; text-align:center;">Repo DB &gt; ORA_SQL_ELAPSE</th>
+              <th colspan="${statGroupColspan}" style="border:1px solid #ccc; padding:4px; text-align:center;">Repo DB &gt; ORA_SQL_STAT_10MIN</th>
+            </tr>
+            <tr style="background:#0a4c5a; color:white;">
+              ${channelHeaderHtml}
+              ${channelHeaderHtml}
+            </tr>
+            <tr style="background:#0a4c5a; color:white;">
+              ${dataValueHeaderHtml}
+            </tr>
+          </thead>
+          <tbody>${rowsHtml}</tbody>
+        </table>
+      </div>
+      <div style="margin-top:14px; padding:12px; background:#ffffff; border:1px dashed #ccc; border-radius:6px;">
+        <strong>Cleanup Log:</strong> <span style="font-family:monospace; margin-left:8px;">${escHtml(cleanup)}</span>
+      </div>
     </div>
   `;
-  const tableHeadHtml = `
-        <thead>
-          <tr style="background:#f7f7f7; color:#b91c1c; font-weight:700;">
-            <th colspan="3" style="border:1px solid #ccc; padding:4px; text-align:center;"></th>
-            <th colspan="2" style="border:1px solid #ccc; padding:4px; text-align:center;">湲곕? 寃곌낵</th>
-            <th colspan="4" style="border:1px solid #ccc; padding:4px; text-align:center;">XView 諛⑺뼢??寃利?/th>
-            <th colspan="4" style="border:1px solid #ccc; padding:4px; text-align:center;">SQL_STAT 諛⑺뼢??寃利?/th>
-          </tr>
-          <tr style="background:#0a4c5a; color:white;">
-            <th rowspan="3" style="border:1px solid #ccc; padding:10px; text-align:center; min-width:80px;">Test Case</th>
-            <th rowspan="3" style="border:1px solid #ccc; padding:10px; text-align:center; min-width:280px;">Test Info</th>
-            <th rowspan="3" style="border:1px solid #ccc; padding:10px; text-align:center; min-width:240px;">寃利????荑쇰━</th>
-            <th colspan="2" rowspan="2" style="border:1px solid #ccc; padding:10px; text-align:center;">Target DB > V$SQL</th>
-            <th colspan="4" style="border:1px solid #ccc; padding:4px; text-align:center;">Repo DB > ORA_SQL_ELAPSE</th>
-            <th colspan="4" style="border:1px solid #ccc; padding:4px; text-align:center;">Repo DB > ORA_SQL_STAT_10MIN</th>
-          </tr>
-          <tr style="background:#0a4c5a; color:white;">
-            <th colspan="2" style="border:1px solid #ccc; padding:4px; text-align:center;">VSQL_RTS</th>
-            <th colspan="2" style="border:1px solid #ccc; padding:4px; text-align:center;">POL_RTS</th>
-            <th colspan="2" style="border:1px solid #ccc; padding:4px; text-align:center;">VSQL_RTS</th>
-            <th colspan="2" style="border:1px solid #ccc; padding:4px; text-align:center;">POL_RTS</th>
-          </tr>
-          <tr style="background:#0a4c5a; color:white;">
-            <th style="border:1px solid #ccc; padding:6px; text-align:center; min-width:140px;">DATA</th>
-            <th style="border:1px solid #ccc; padding:6px; text-align:center; min-width:80px;">VALUE</th>
-            <th style="border:1px solid #ccc; padding:6px; text-align:center; min-width:140px;">DATA</th>
-            <th style="border:1px solid #ccc; padding:6px; text-align:center; min-width:80px;">VALUE</th>
-            <th style="border:1px solid #ccc; padding:6px; text-align:center; min-width:140px;">DATA</th>
-            <th style="border:1px solid #ccc; padding:6px; text-align:center; min-width:80px;">VALUE</th>
-            <th style="border:1px solid #ccc; padding:6px; text-align:center; min-width:140px;">DATA</th>
-            <th style="border:1px solid #ccc; padding:6px; text-align:center; min-width:80px;">VALUE</th>
-            <th style="border:1px solid #ccc; padding:6px; text-align:center; min-width:140px;">DATA</th>
-            <th style="border:1px solid #ccc; padding:6px; text-align:center; min-width:80px;">VALUE</th>
-          </tr>
-        </thead>
-  `;
-  const cleanupHtml = `
-    <div style="margin-top:14px; padding:12px; background:var(--theme-panel-alt-bg); border: 1px dashed #ccc; border-radius:6px;">
-      <strong>Cleanup Log:</strong> <span style="font-family:monospace; margin-left:8px;">${cleanup}</span>
-    </div>
-  `;
-  const gridHtml = `
-  <div id="repoTableDisplayTarget" style="font-size:12px; margin-bottom: 20px; font-family:-apple-system, sans-serif; overflow-x: auto;">
-    <div style="margin-bottom: 10px; font-size: 14px; font-weight: bold; background: #e3f2fd; padding: 10px; border-radius: 4px; border-left: 4px solid #1a73e8; color: #333;">
-      <span style="color: #1a73e8; margin-right: 5px;">[VSQL Repo]</span> <span style="font-weight: normal; margin-right: 20px;">${escHtml(vsqlRepoTxt)}</span>
-      <span style="color: #d93025; margin-right: 5px;">[POL Repo]</span> <span style="font-weight: normal; margin-right: 20px;">${escHtml(polRepoTxt)}</span>
-      <span style="color: #1a73e8; margin-right: 5px;">[Target DB]</span> <span style="font-weight: normal; margin-right: 20px;">${escHtml(targetTxt)}</span>
-      <span style="color: #555; margin-right: 5px;">[조회 기준 시각]</span> <span style="font-weight: normal; color: #e65100;">${loggingTimeTxt}</span>
-      <span style="color: #555; margin-left: 16px; margin-right: 5px;">[Partition Date]</span> <span style="font-weight: normal; color: #e65100;">${partitionDateTxt}</span>
-    </div>
-    <div style="min-width: 1400px;">
-      <table style="width:100%; border-collapse:collapse; text-align:left; border:1px solid #ccc;">
-        <thead>
-          <tr style="background:#f7f7f7; color:#b91c1c; font-weight:700;">
-            <th colspan="3" style="border:1px solid #ccc; padding:4px; text-align:center;"></th>
-            <th colspan="2" style="border:1px solid #ccc; padding:4px; text-align:center;">기대 결과</th>
-            <th colspan="4" style="border:1px solid #ccc; padding:4px; text-align:center;">XView 방향성 검증</th>
-            <th colspan="4" style="border:1px solid #ccc; padding:4px; text-align:center;">SQL_STAT 방향성 검증</th>
-          </tr>
-          <tr style="background:#0a4c5a; color:white;">
-            <th rowspan="3" style="border:1px solid #ccc; padding:10px; text-align:center; min-width:80px;">Test Case</th>
-            <th rowspan="3" style="border:1px solid #ccc; padding:10px; text-align:center; min-width:280px;">Test Info</th>
-            <th rowspan="3" style="border:1px solid #ccc; padding:10px; text-align:center; min-width:240px;">검증 대상 쿼리</th>
-            <th colspan="2" rowspan="2" style="border:1px solid #ccc; padding:10px; text-align:center;">Target DB > V$SQL</th>
-            <th colspan="4" style="border:1px solid #ccc; padding:4px; text-align:center;">Repo DB > ORA_SQL_ELAPSE</th>
-            <th colspan="4" style="border:1px solid #ccc; padding:4px; text-align:center;">Repo DB > ORA_SQL_STAT_10MIN</th>
-          </tr>
-          <tr style="background:#0a4c5a; color:white;">
-            <th colspan="2" style="border:1px solid #ccc; padding:4px; text-align:center;">VSQL_RTS</th>
-            <th colspan="2" style="border:1px solid #ccc; padding:4px; text-align:center;">POL_RTS</th>
-            <th colspan="2" style="border:1px solid #ccc; padding:4px; text-align:center;">VSQL_RTS</th>
-            <th colspan="2" style="border:1px solid #ccc; padding:4px; text-align:center;">POL_RTS</th>
-          </tr>
-          <tr style="background:#0a4c5a; color:white;">
-            <th style="border:1px solid #ccc; padding:6px; text-align:center; min-width:140px;">DATA</th>
-            <th style="border:1px solid #ccc; padding:6px; text-align:center; min-width:80px;">VALUE</th>
-            <th style="border:1px solid #ccc; padding:6px; text-align:center; min-width:140px;">DATA</th>
-            <th style="border:1px solid #ccc; padding:6px; text-align:center; min-width:80px;">VALUE</th>
-            <th style="border:1px solid #ccc; padding:6px; text-align:center; min-width:140px;">DATA</th>
-            <th style="border:1px solid #ccc; padding:6px; text-align:center; min-width:80px;">VALUE</th>
-            <th style="border:1px solid #ccc; padding:6px; text-align:center; min-width:140px;">DATA</th>
-            <th style="border:1px solid #ccc; padding:6px; text-align:center; min-width:80px;">VALUE</th>
-            <th style="border:1px solid #ccc; padding:6px; text-align:center; min-width:140px;">DATA</th>
-            <th style="border:1px solid #ccc; padding:6px; text-align:center; min-width:80px;">VALUE</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${rowsHtml}
-        </tbody>
-      </table>
-    </div>
-    <div style="margin-top:14px; padding:12px; background:var(--theme-panel-alt-bg); border: 1px dashed #ccc; border-radius:6px;">
-      <strong>Cleanup Log:</strong> <span style="font-family:monospace; margin-left:8px;">${cleanup}</span>
-    </div>
-  </div>
-  <div id="repoTableExportTarget" style="position:fixed; left:-100000px; top:0; z-index:-1; width:max-content; max-width:none; font-size:12px; font-family:-apple-system, sans-serif; background:#ffffff; color:#333; overflow:visible; padding:0; margin:0;">
-    ${infoBannerHtml}
-    <div style="min-width: 1400px; width:max-content;">
-      <table style="width:100%; border-collapse:collapse; text-align:left; border:1px solid #ccc; background:#fff;">
-        ${tableHeadHtml}
-        <tbody>
-          ${rowsHtmlExport}
-        </tbody>
-      </table>
-    </div>
-    ${cleanupHtml}
-  </div>
-  `;
-  content.innerHTML = gridHtml;
+
+  content.innerHTML = tableHtml;
   _finalizeRepoExportTable();
   const exportTarget = $('repoTableExportTarget');
   if (exportTarget) {
@@ -3501,8 +3515,31 @@ function renderNewRepoResultGrid(json) {
   setRepoTableDownloadState(true);
 }
 
+function renderNewRepoResultGrid(json) {
+  const wrap = $('repoNewResultWrap');
+  const content = wrap || $('resultContent');
+  if (!wrap) $('resultArea').classList.remove('hidden');
+
+  if (json.error || json.overall_status === 'error') {
+    setRepoTableDownloadState(false);
+    content.innerHTML = `<div class="step-card"><div class="step-head"><span class="badge badge-error">ERROR</span></div><div class="evidence">${escHtml(json.error || 'Unknown Error')}</div></div>`;
+    return;
+  }
+
+  const d = json.data || {};
+  const normalizedRepoResults = getNormalizedRepoResults(d);
+  if (normalizedRepoResults.length) {
+    renderRepoResultsMatrix(content, d, normalizedRepoResults);
+    return;
+  }
+
+  setRepoTableDownloadState(false);
+  content.innerHTML = `<div class="step-card"><div class="evidence">Repo 결과가 없습니다.</div></div>`;
+}
+
 // ─── Init ──────────────────────────────────
 $('btnDownloadRepoTableImage').onclick = _downloadRepoTableImage;
+initRepoSlotUi();
 resetTargetDbArea();
 resetResultArea();
 initThemeToggle();

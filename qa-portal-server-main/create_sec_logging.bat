@@ -25,7 +25,7 @@ echo.
 
 REM Python 스크립트 실행
 echo 🚀 sec_logging.json 생성 중...
-python create_sec_logging_local.py
+python scripts\create_sec_logging_local.py
 
 echo.
 pause

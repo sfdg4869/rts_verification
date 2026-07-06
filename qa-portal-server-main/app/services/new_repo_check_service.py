@@ -4,11 +4,19 @@ import os
 import re
 from datetime import datetime, date, time as dt_time
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 import oracledb
 
 from app.services.oracle_service import OracleService
-from app.shared_db import get_connection, release_connection, _infer_db_engine, get_db_config
+from app.shared_db import (
+    _connect_oracle_db,
+    _connect_postgres_db,
+    _infer_db_engine,
+    connect_repo_by_config_id,
+    get_connection,
+    get_db_config,
+    release_connection,
+)
 
 def _fetch_dict_rows(cur) -> List[Dict[str, Any]]:
     cols = [d[0].lower() for d in (cur.description or [])]
@@ -142,7 +150,7 @@ def _number_literal_list(values: List[Any]) -> str:
 
 def _read_sql_template(filename: str) -> str:
     root_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-    path = os.path.join(root_dir, "tests", filename)
+    path = os.path.join(root_dir, "app", "sql_templates", filename)
     if not os.path.exists(path):
         return ""
     try:
@@ -270,6 +278,426 @@ def _extract_case_key_from_sql_text(sql_text: str) -> Optional[str]:
         return "case6_proc5"
     return None
 
+
+CASE_ORDER = [
+    "case2_proc1",
+    "case3_proc2",
+    "case4_proc3",
+    "case5_proc4",
+    "case6_proc5",
+]
+
+
+FIXED_SQL_IDS = [
+    "fbf2t9pw12ynm",
+    "ga6tfrmnrzwax",
+    "af5w9c5uq9mf5",
+    "9yv10yjy19dva",
+    "9t1uh0g3vjnd7",
+]
+
+
+SLOT_LABELS = {
+    "repo_a": "Repo A",
+    "repo_b": "Repo B",
+}
+
+
+def _uniq(items: List[Any]) -> List[Any]:
+    out: List[Any] = []
+    for it in items:
+        if it is None:
+            continue
+        if it not in out:
+            out.append(it)
+    return out
+
+
+def _safe_pg_schema(raw: Any) -> str:
+    s = str(raw or "").strip()
+    if not s:
+        return "public"
+    ok = (s[0].isalpha() or s[0] == "_") and all(ch.isalnum() or ch == "_" for ch in s)
+    return s if ok else "public"
+
+
+def _safe_db_id_list(raw: Optional[str], default_db_id: int) -> str:
+    src = str(raw or "").strip()
+    if not src:
+        return str(int(default_db_id))
+    vals: List[str] = []
+    for token in src.split(","):
+        t = token.strip()
+        if t.isdigit():
+            vals.append(str(int(t)))
+    return ",".join(vals) if vals else str(int(default_db_id))
+
+
+def _normalize_repo_mode(raw: Any) -> str:
+    mode = str(raw or "").strip().lower()
+    return mode if mode in {"vsql", "pol"} else "vsql"
+
+
+def _slot_label(slot_id: Any) -> str:
+    return SLOT_LABELS.get(str(slot_id or "").strip().lower(), "Repo")
+
+
+def _normalize_repo_query_item(
+    item: Optional[Dict[str, Any]],
+    default_slot_id: str = "repo_a",
+) -> Dict[str, Any]:
+    raw = dict(item or {})
+    slot_id = str(raw.get("slot_id") or default_slot_id or "repo_a").strip().lower()
+    if slot_id not in SLOT_LABELS:
+        slot_id = default_slot_id if default_slot_id in SLOT_LABELS else "repo_a"
+    source_type = str(raw.get("source_type") or "").strip().lower()
+    if source_type not in {"active_repo", "config", "direct"}:
+        if raw.get("config_id"):
+            source_type = "config"
+        elif raw.get("direct_config"):
+            source_type = "direct"
+        else:
+            source_type = "active_repo"
+    return {
+        "slot_id": slot_id,
+        "source_type": source_type,
+        "config_id": str(raw.get("config_id") or "").strip() or None,
+        "direct_config": dict(raw.get("direct_config") or {}),
+        "mode": _normalize_repo_mode(raw.get("mode")),
+        "target_mapping": {
+            "db_id_list": str((raw.get("target_mapping") or {}).get("db_id_list") or "").strip() or None,
+            "schema_name": str((raw.get("target_mapping") or {}).get("schema_name") or "").strip() or None,
+        },
+    }
+
+
+def _build_legacy_repo_queries(
+    *,
+    repo_db_id_list: Optional[str] = None,
+    repo_schema_name: Optional[str] = None,
+    pol_repo_config_id: Optional[str] = None,
+    pol_repo_schema_name: Optional[str] = None,
+    pol_repo_db_id_list: Optional[str] = None,
+    repo_mode: str = "vsql",
+    pol_repo_mode: str = "pol",
+) -> List[Dict[str, Any]]:
+    queries = [
+        _normalize_repo_query_item(
+            {
+                "slot_id": "repo_a",
+                "source_type": "active_repo",
+                "mode": repo_mode,
+                "target_mapping": {
+                    "db_id_list": repo_db_id_list,
+                    "schema_name": repo_schema_name,
+                },
+            },
+            "repo_a",
+        )
+    ]
+    if pol_repo_config_id:
+        queries.append(
+            _normalize_repo_query_item(
+                {
+                    "slot_id": "repo_b",
+                    "source_type": "config",
+                    "config_id": pol_repo_config_id,
+                    "mode": pol_repo_mode,
+                    "target_mapping": {
+                        "db_id_list": pol_repo_db_id_list,
+                        "schema_name": pol_repo_schema_name,
+                    },
+                },
+                "repo_b",
+            )
+        )
+    return queries
+
+
+def _build_step5_queries(
+    *,
+    engine: str,
+    schema: str,
+    id_list_str: str,
+    part_date: str,
+    log_time_str: str,
+    id_filter: str,
+    id_order_expr: str,
+) -> Tuple[str, str]:
+    if engine == "oracle":
+        tmpl = _read_sql_template("ora_step5.txt") or _read_sql_template("ora_case5.txt")
+        if tmpl.strip():
+            parts = [p.strip() for p in tmpl.split(";") if p.strip().upper().startswith("SELECT")]
+            if len(parts) >= 2:
+                return (
+                    parts[0]
+                    .replace("${db_id_list}", id_list_str)
+                    .replace("${partition_date}", part_date)
+                    .replace("${logging_time}", log_time_str),
+                    parts[1]
+                    .replace("${db_id_list}", id_list_str)
+                    .replace("${partition_date}", part_date)
+                    .replace("${logging_time}", log_time_str),
+                )
+        q_elapse = f"""
+            SELECT a.db_id, b.instance_name, a.sql_id, a.sql_hash, a.sql_addr, a.sql_plan_hash,
+                   count(*) AS execution_count,
+                   sum(a.ELAPSE)/1000 AS total_elapse_sec,
+                   (sum(a.ELAPSE)/count(*))/1000 AS per_elapse_ms_to_sec
+            FROM ora_sql_elapse a, apm_db_info b
+            WHERE a.db_id = b.db_id AND a.db_id IN ({id_list_str})
+              AND a.partition_key > TO_NUMBER('{part_date}' || '000')
+              AND a.time >= TO_TIMESTAMP('{log_time_str}', 'YYYY-MM-DD HH24:MI:SS')
+              AND a.sql_id in ({id_filter})
+            GROUP BY a.db_id, b.instance_name, a.sql_id, a.sql_hash, a.sql_addr, a.sql_plan_hash
+            ORDER BY a.db_id, {id_order_expr}, a.sql_plan_hash
+        """
+        q_stat = f"""
+            SELECT a.db_id, b.instance_name, a.time, a.sql_id, a.sql_hash, a.sql_addr, a.sql_plan_hash,
+                   a.execution_count,
+                   (a.elapsed_time/100) AS elapse_cs_to_sec,
+                   CASE WHEN a.execution_count < 1 THEN NULL ELSE ((a.elapsed_time/a.execution_count)/100) END AS per_elapse_sec
+            FROM ora_sql_stat_10min a, apm_db_info b
+            WHERE a.db_id = b.db_id AND a.db_id IN ({id_list_str})
+              AND a.partition_key > TO_NUMBER('{part_date}' || '000')
+              AND a.time >= TO_TIMESTAMP('{log_time_str}', 'YYYY-MM-DD HH24:MI:SS')
+              AND a.sql_id in ({id_filter})
+            ORDER BY a.time, a.db_id, {id_order_expr}, a.time, a.sql_plan_hash
+        """
+        return q_elapse, q_stat
+
+    pg_case_order = (
+        "CASE a.sql_id "
+        + " ".join([f"WHEN '{sid}' THEN {i}" for i, sid in enumerate(FIXED_SQL_IDS, 1)])
+        + " ELSE 999 END"
+    )
+    tmpl = _read_sql_template("pg_step5.txt") or _read_sql_template("pg_case5.txt")
+    if tmpl.strip():
+        parts = [p.strip() for p in tmpl.split(";") if p.strip().upper().startswith("SELECT")]
+        if len(parts) >= 2:
+            return (
+                parts[0]
+                .replace("${schema_name}", schema)
+                .replace("${partition_date}", part_date)
+                .replace("${logging_time}", f"'{log_time_str}'"),
+                parts[1]
+                .replace("${schema_name}", schema)
+                .replace("${partition_date}", part_date)
+                .replace("${logging_time}", f"'{log_time_str}'"),
+            )
+    q_elapse = f"""
+        SELECT a.db_id, b.instance_name,
+               a.sql_id, a.sql_hash, a.sql_addr, a.sql_plan_hash,
+               count(*) as execution_count,
+               sum(a.elapse)/1000.0 AS total_elapse_sec,
+               (sum(a.elapse)/count(*))/1000.0 AS per_elapse_ms_to_sec
+        FROM {schema}.ora_sql_elapse a, public.apm_db_info b
+        WHERE a.db_id = b.db_id
+          AND a.db_id IN ({id_list_str})
+          AND a.partition_key > {part_date}000
+          AND a.time >= '{log_time_str}'::timestamp
+          AND a.sql_id in ({id_filter})
+        GROUP BY a.db_id, b.instance_name, a.sql_id, a.sql_hash, a.sql_addr, a.sql_plan_hash
+        ORDER BY a.db_id, {pg_case_order}, a.sql_plan_hash
+    """
+    q_stat = f"""
+        SELECT a.db_id, b.instance_name,
+               a.time, a.sql_id, a.sql_hash, a.sql_addr, a.sql_plan_hash,
+               a.execution_count,
+               (a.elapsed_time/100.0) AS elapse_cs_to_sec,
+               CASE WHEN a.execution_count < 1 THEN NULL ELSE ((a.elapsed_time/a.execution_count)/100.0) END AS per_elapse_sec
+        FROM {schema}.ora_sql_stat_10min a, public.apm_db_info b
+        WHERE a.db_id = b.db_id
+          AND a.db_id IN ({id_list_str})
+          AND a.partition_key > {part_date}000
+          AND a.time >= '{log_time_str}'::timestamp
+          AND a.sql_id in ({id_filter})
+        ORDER BY a.db_id, {pg_case_order}, a.time, a.sql_plan_hash
+    """
+    return q_elapse, q_stat
+
+
+def _open_repo_query_connection(
+    repo_query: Dict[str, Any],
+) -> Tuple[Any, Dict[str, Any], Callable[[Any], None]]:
+    source_type = str(repo_query.get("source_type") or "active_repo").strip().lower()
+
+    if source_type == "active_repo":
+        cfg = get_db_config("repo") or {}
+        if not cfg:
+            raise ValueError("Active repo is not configured")
+        conn = get_connection("repo")
+
+        def _release_active(connection: Any) -> None:
+            release_connection("repo", connection)
+
+        return conn, dict(cfg), _release_active
+
+    if source_type == "config":
+        config_id = str(repo_query.get("config_id") or "").strip()
+        if not config_id:
+            raise ValueError("config_id is required for repo query")
+        conn, cfg = connect_repo_by_config_id(config_id)
+
+        def _close_direct(connection: Any) -> None:
+            try:
+                connection.close()
+            except Exception:
+                pass
+
+        return conn, dict(cfg), _close_direct
+
+    if source_type == "direct":
+        cfg = dict(repo_query.get("direct_config") or {})
+        if not cfg:
+            raise ValueError("direct_config is required for direct repo query")
+        engine = _infer_db_engine(cfg, "postgresql")
+        cfg["db_type"] = engine
+        conn = _connect_oracle_db(cfg) if engine == "oracle" else _connect_postgres_db(cfg)
+
+        def _close_direct(connection: Any) -> None:
+            try:
+                connection.close()
+            except Exception:
+                pass
+
+        return conn, cfg, _close_direct
+
+    raise ValueError(f"Unsupported repo query source_type: {source_type}")
+
+
+def _execute_repo_query_slot(
+    *,
+    repo_query: Dict[str, Any],
+    default_db_id: int,
+    partition_date: str,
+    logging_time_str: str,
+    sql_id_filter: str,
+    sql_id_order_expr: str,
+    sql_id_replacements: Optional[Dict[str, str]] = None,
+    pg_retry_wait_seconds: int = 30,
+) -> Dict[str, Any]:
+    slot_id = str(repo_query.get("slot_id") or "repo_a").strip().lower()
+    mode = _normalize_repo_mode(repo_query.get("mode"))
+    target_mapping = dict(repo_query.get("target_mapping") or {})
+
+    conn = None
+    cursor = None
+    release_fn: Optional[Callable[[Any], None]] = None
+    try:
+        conn, cfg, release_fn = _open_repo_query_connection(repo_query)
+        cursor = conn.cursor()
+        engine = _infer_db_engine(cfg, "postgresql")
+        schema_name = (
+            _safe_pg_schema(target_mapping.get("schema_name") or cfg.get("schema_name"))
+            if engine in ("postgresql", "postgres")
+            else ""
+        )
+        db_id_list = _safe_db_id_list(target_mapping.get("db_id_list"), int(default_db_id))
+        q_elapse, q_stat = _build_step5_queries(
+            engine=engine,
+            schema=schema_name,
+            id_list_str=db_id_list,
+            part_date=partition_date,
+            log_time_str=logging_time_str,
+            id_filter=sql_id_filter,
+            id_order_expr=sql_id_order_expr,
+        )
+        for expected_id, actual_id in (sql_id_replacements or {}).items():
+            q_elapse = q_elapse.replace(expected_id, actual_id)
+            q_stat = q_stat.replace(expected_id, actual_id)
+        if engine in ("postgresql", "postgres"):
+            elapse_rows = _query_rows_with_pg_apm_db_info_fallback(
+                cursor, q_elapse, schema_name, max_attempts=4, wait_seconds=8
+            )
+            stat_rows = _query_rows_with_pg_apm_db_info_fallback(
+                cursor, q_stat, schema_name, max_attempts=20, wait_seconds=pg_retry_wait_seconds
+            )
+        else:
+            elapse_rows = _query_rows_with_retry(cursor, q_elapse, max_attempts=4, wait_seconds=8)
+            stat_rows = _query_rows_with_retry(cursor, q_stat, max_attempts=20, wait_seconds=pg_retry_wait_seconds)
+        return {
+            "slot_id": slot_id,
+            "slot_label": _slot_label(slot_id),
+            "engine": engine,
+            "mode": mode,
+            "schema_name": schema_name,
+            "db_id_list": db_id_list,
+            "elapse_rows": elapse_rows,
+            "stat_rows": stat_rows,
+            "error": "",
+        }
+    except Exception as exc:
+        return {
+            "slot_id": slot_id,
+            "slot_label": _slot_label(slot_id),
+            "engine": "",
+            "mode": mode,
+            "schema_name": "",
+            "db_id_list": _safe_db_id_list(target_mapping.get("db_id_list"), int(default_db_id)),
+            "elapse_rows": [],
+            "stat_rows": [],
+            "error": str(exc),
+        }
+    finally:
+        try:
+            if cursor:
+                cursor.close()
+        except Exception:
+            pass
+        try:
+            if conn and release_fn:
+                release_fn(conn)
+        except Exception:
+            pass
+
+
+def _repo_queries_to_legacy_fields(result_data: Dict[str, Any], repo_results: List[Dict[str, Any]]) -> None:
+    result_data["repo_results"] = repo_results
+    result_data["repo_query_errors"] = {
+        item["slot_id"]: item["error"] for item in repo_results if item.get("error")
+    }
+    result_data["repo_elapse"] = []
+    result_data["repo_stat"] = []
+    result_data["repo_elapse_vsql"] = []
+    result_data["repo_stat_vsql"] = []
+    result_data["repo_elapse_pol"] = []
+    result_data["repo_stat_pol"] = []
+    result_data["repo_engine"] = ""
+    result_data["repo_schema"] = ""
+    result_data["repo_mode"] = ""
+    result_data.pop("repo_error", None)
+    result_data.pop("pol_repo_error", None)
+    result_data.pop("pol_repo_engine", None)
+    result_data.pop("pol_repo_schema", None)
+    result_data.pop("pol_repo_db_id_list", None)
+
+    first_success = next((item for item in repo_results if not item.get("error")), None)
+    if first_success:
+        result_data["repo_elapse"] = first_success.get("elapse_rows") or []
+        result_data["repo_stat"] = first_success.get("stat_rows") or []
+        result_data["db_id_list"] = first_success.get("db_id_list") or result_data.get("db_id_list", "")
+
+    first_vsql = next((item for item in repo_results if item.get("mode") == "vsql"), None)
+    if first_vsql:
+        result_data["repo_elapse_vsql"] = first_vsql.get("elapse_rows") or []
+        result_data["repo_stat_vsql"] = first_vsql.get("stat_rows") or []
+        result_data["repo_engine"] = first_vsql.get("engine") or ""
+        result_data["repo_schema"] = first_vsql.get("schema_name") or ""
+        result_data["repo_mode"] = first_vsql.get("mode") or ""
+        if first_vsql.get("error"):
+            result_data["repo_error"] = first_vsql["error"]
+
+    first_pol = next((item for item in repo_results if item.get("mode") == "pol"), None)
+    if first_pol:
+        result_data["repo_elapse_pol"] = first_pol.get("elapse_rows") or []
+        result_data["repo_stat_pol"] = first_pol.get("stat_rows") or []
+        result_data["pol_repo_engine"] = first_pol.get("engine") or ""
+        result_data["pol_repo_schema"] = first_pol.get("schema_name") or ""
+        result_data["pol_repo_db_id_list"] = first_pol.get("db_id_list") or ""
+        if first_pol.get("error"):
+            result_data["pol_repo_error"] = first_pol["error"]
+
 def run_new_repo_check(
     db_id: int,
     target_config: Dict[str, Any],
@@ -285,53 +713,28 @@ def run_new_repo_check(
     pol_repo_config_id: Optional[str] = None,
     pol_repo_schema_name: Optional[str] = None,
     pol_repo_db_id_list: Optional[str] = None,
+    repo_queries: Optional[List[Dict[str, Any]]] = None,
     stop_after_step4: bool = False,
 ) -> Dict[str, Any]:
     def _progress(done: int, total: int, step_name: str, step_status: str) -> None:
         if progress_callback:
             progress_callback(done, total, step_name, step_status)
-    
-    def _uniq(items: List[Any]) -> List[Any]:
-        out: List[Any] = []
-        for it in items:
-            if it is None:
-                continue
-            if it not in out:
-                out.append(it)
-        return out
 
-    def _safe_pg_schema(raw: Any) -> str:
-        s = str(raw or "").strip()
-        if not s:
-            return "public"
-        ok = (s[0].isalpha() or s[0] == "_") and all(ch.isalnum() or ch == "_" for ch in s)
-        return s if ok else "public"
-
-    def _safe_db_id_list(raw: Optional[str], default_db_id: int) -> str:
-        src = str(raw or "").strip()
-        if not src:
-            return str(int(default_db_id))
-        vals = []
-        for token in src.split(","):
-            t = token.strip()
-            if t.isdigit():
-                vals.append(str(int(t)))
-        return ",".join(vals) if vals else str(int(default_db_id))
-
-    case_order = [
-        "case2_proc1",
-        "case3_proc2",
-        "case4_proc3",
-        "case5_proc4",
-        "case6_proc5",
+    case_order = CASE_ORDER
+    fixed_sql_ids = FIXED_SQL_IDS
+    normalized_repo_queries = [
+        _normalize_repo_query_item(item, "repo_a" if idx == 0 else "repo_b")
+        for idx, item in enumerate(repo_queries or [])
     ]
-    fixed_sql_ids = [
-        "fbf2t9pw12ynm",
-        "ga6tfrmnrzwax",
-        "af5w9c5uq9mf5",
-        "9yv10yjy19dva",
-        "9t1uh0g3vjnd7",
-    ]
+    if not normalized_repo_queries:
+        normalized_repo_queries = _build_legacy_repo_queries(
+            repo_db_id_list=repo_db_id_list,
+            repo_schema_name=repo_schema_name,
+            pol_repo_config_id=pol_repo_config_id,
+            pol_repo_schema_name=pol_repo_schema_name,
+            pol_repo_db_id_list=pol_repo_db_id_list,
+        )
+    total_steps = 5 + len(normalized_repo_queries)
 
     overall_status = "pass"
     error_msg = ""
@@ -355,6 +758,7 @@ def run_new_repo_check(
         "case_exec_after": {},
         "case_exec_delta": {},
         "step5_sql_id_per_case": {},
+        "repo_results": [],
     }
 
     target_user = str(target_config.get("user") or "").strip()
@@ -370,9 +774,9 @@ def run_new_repo_check(
         dsn = oracledb.makedsn(target_host, target_port, sid=target_sid)
         conn = oracledb.connect(user=target_user, password=target_password, dsn=dsn)
     except Exception as e:
-        _progress(1, 6, "target_connect", "fail")
+        _progress(1, total_steps, "target_connect", "fail")
         return {"overall_status": "error", "error": f"Target DB ({target_user}) 연결 실패: {e}", "data": result_data}
-    _progress(1, 6, "target_connect", "pass")
+    _progress(1, total_steps, "target_connect", "pass")
     target_svc = None  # 직접 연결이므로 svc 불필요
 
     logging_anchor = datetime.now()
@@ -381,7 +785,7 @@ def run_new_repo_check(
         cur = conn.cursor()
 
         # Step 1: 권한 확인
-        _progress(1, 6, "target_permission_check(ALTER_SYSTEM)", "running")
+        _progress(1, total_steps, "target_permission_check(ALTER_SYSTEM)", "running")
         alter_sql = "SELECT * FROM USER_SYS_PRIVS WHERE privilege = 'ALTER SYSTEM'"
         lock_sql = (
             "SELECT 'USER_TAB_PRIVS' AS source, privilege AS dbms_lock_privilege "
@@ -405,10 +809,10 @@ def run_new_repo_check(
         )
         cur.execute(alter_sql)
         alter_rows = _fetch_dict_rows(cur)
-        _progress(1, 6, "target_permission_check(DBMS_LOCK)", "running")
+        _progress(1, total_steps, "target_permission_check(DBMS_LOCK)", "running")
         cur.execute(lock_sql)
         lock_rows = _fetch_dict_rows(cur)
-        _progress(1, 6, "target_permission_check(DBMS_UTILITY)", "running")
+        _progress(1, total_steps, "target_permission_check(DBMS_UTILITY)", "running")
         cur.execute(util_sql)
         util_rows = _fetch_dict_rows(cur)
         result_data["permission_checks"] = {
@@ -420,13 +824,13 @@ def run_new_repo_check(
             "dbms_utility_rows": util_rows,
         }
         if not (bool(alter_rows) and bool(lock_rows) and bool(util_rows)):
-            _progress(1, 6, "target_permission_check", "fail")
+            _progress(1, total_steps, "target_permission_check", "fail")
             return {
                 "overall_status": "fail",
                 "error": "필수 권한(ALTER SYSTEM / DBMS_LOCK / DBMS_UTILITY) 부족",
                 "data": result_data,
             }
-        _progress(1, 6, "target_permission_check", "pass")
+        _progress(1, total_steps, "target_permission_check", "pass")
 
         # Step 2: 테스트 프로시저 생성
         for p in ("qs_sql_test_proc1", "qs_sql_test_proc2", "qs_sql_test_proc3", "qs_sql_test_proc4", "qs_sql_test_proc5"):
@@ -491,11 +895,11 @@ def run_new_repo_check(
                 END;
             """)
         conn.commit()
-        _progress(2, 6, "target_create_test_procedures", "pass")
+        _progress(2, total_steps, "target_create_test_procedures", "pass")
 
         # Step 3: PLSQL FOR LOOP 실행
         logging_anchor = datetime.now()
-        _progress(3, 6, "target_run_plsql_loop(start)", "running")
+        _progress(3, total_steps, "target_run_plsql_loop(start)", "running")
         cur.execute("""
             SELECT sql_id, executions, sql_fulltext
             FROM v$sql
@@ -526,7 +930,7 @@ def run_new_repo_check(
             started = time.time()
             while not hb_stop.wait(5):
                 elapsed = int(time.time() - started)
-                _progress(3, 6, f"target_run_plsql_loop(running {elapsed}s)", "running")
+                _progress(3, total_steps, f"target_run_plsql_loop(running {elapsed}s)", "running")
 
         hb_thread = threading.Thread(target=_loop_heartbeat, daemon=True, name="repo-new-step3-heartbeat")
         hb_thread.start()
@@ -547,7 +951,7 @@ def run_new_repo_check(
         cur.execute(step3_sql)
         hb_stop.set()
         conn.commit()
-        _progress(3, 6, "target_run_plsql_loop", "pass")
+        _progress(3, total_steps, "target_run_plsql_loop", "pass")
 
         # Step 4: v$sql 조회
         case4_sql = _read_sql_template("step4.txt") or _read_sql_template("case4.txt")
@@ -644,12 +1048,12 @@ def run_new_repo_check(
             a = int(post_exec.get(key, b))
             deltas[key] = max(0, a - b)
         result_data["case_exec_delta"] = deltas
-        _progress(4, 6, "target_vsql_query", "pass")
+        _progress(4, total_steps, "target_vsql_query", "pass")
 
     except Exception as e:
         overall_status = "error"
         error_msg = f"Step 1~4 Target DB Error: {str(e)}"
-        _progress(4, 6, "target_step_error", "fail")
+        _progress(4, total_steps, "target_step_error", "fail")
     finally:
         try:
             cur.close()
@@ -669,50 +1073,35 @@ def run_new_repo_check(
         return {"overall_status": overall_status, "error": error_msg, "data": result_data}
 
     # Step 5: Repo 수집 결과 조회 (Oracle/PG 분기)
+    actual_case_ids = result_data.get("case_actual_sql_ids") or {}
+    expected_to_actual: Dict[str, str] = {}
+    effective_sql_ids: List[str] = []
+    step5_sql_id_per_case: Dict[str, str] = {}
+    for idx, case_key in enumerate(case_order):
+        expected_id = fixed_sql_ids[idx]
+        actual_id = str(actual_case_ids.get(case_key) or expected_id).strip().lower()
+        expected_to_actual[expected_id] = actual_id
+        effective_sql_ids.append(actual_id)
+        step5_sql_id_per_case[case_key] = actual_id
+    effective_sql_ids = _uniq(effective_sql_ids) or fixed_sql_ids
+    result_data["effective_sql_ids"] = effective_sql_ids
+    result_data["step5_sql_id_per_case"] = step5_sql_id_per_case
+
+    sql_id_filter = _sql_id_literal_list(effective_sql_ids)
+    sql_id_order_expr = _decode_sql_id_order_expr("a.sql_id", effective_sql_ids)
+
+    default_partition_date = logging_anchor.strftime("%y%m%d")
+    partition_date = str(repo_partition_date or default_partition_date).strip()
+    if not (partition_date.isdigit() and len(partition_date) == 6):
+        partition_date = default_partition_date
+    default_logging_time = logging_anchor.strftime("%Y-%m-%d %H:%M:%S")
+    logging_time_str = str(repo_logging_time or default_logging_time).strip()
+    if len(logging_time_str) < 19:
+        logging_time_str = default_logging_time
+    result_data["partition_date"] = partition_date
+    result_data["logging_time"] = logging_time_str
+
     try:
-        repo_cfg = get_db_config("repo") or {}
-        repo_engine = _infer_db_engine(repo_cfg, "postgresql")
-        result_data["repo_engine"] = repo_engine
-        schema_override = str(repo_schema_name or "").strip()
-        schema_name = _safe_pg_schema(schema_override if schema_override else repo_cfg.get("schema_name"))
-        result_data["repo_schema"] = schema_name
-
-        actual_case_ids = result_data.get("case_actual_sql_ids") or {}
-        expected_to_actual: Dict[str, str] = {}
-        effective_sql_ids: List[str] = []
-        step5_sql_id_per_case: Dict[str, str] = {}
-        for idx, case_key in enumerate(case_order):
-            expected_id = fixed_sql_ids[idx]
-            actual_id = str(actual_case_ids.get(case_key) or expected_id).strip().lower()
-            expected_to_actual[expected_id] = actual_id
-            effective_sql_ids.append(actual_id)
-            step5_sql_id_per_case[case_key] = actual_id
-        effective_sql_ids = _uniq(effective_sql_ids) or fixed_sql_ids
-        result_data["effective_sql_ids"] = effective_sql_ids
-        result_data["step5_sql_id_per_case"] = step5_sql_id_per_case
-
-        sql_id_filter = _sql_id_literal_list(effective_sql_ids)
-        sql_id_order_expr = _decode_sql_id_order_expr("a.sql_id", effective_sql_ids)
-
-        def _apply_actual_sql_ids(sql: str) -> str:
-            out = sql
-            for expected_id, actual_id in expected_to_actual.items():
-                out = out.replace(expected_id, actual_id)
-            return out
-
-        default_partition_date = logging_anchor.strftime("%y%m%d")
-        partition_date = str(repo_partition_date or default_partition_date).strip()
-        if not (partition_date.isdigit() and len(partition_date) == 6):
-            partition_date = default_partition_date
-        default_logging_time = logging_anchor.strftime("%Y-%m-%d %H:%M:%S")
-        logging_time_str = str(repo_logging_time or default_logging_time).strip()
-        if len(logging_time_str) < 19:
-            logging_time_str = default_logging_time
-        db_id_list_str = _safe_db_id_list(repo_db_id_list, int(db_id))
-        result_data["partition_date"] = partition_date
-        result_data["logging_time"] = logging_time_str
-        result_data["db_id_list"] = db_id_list_str
-
         def _build_step5_queries(
             engine: str,
             schema: str,
@@ -836,46 +1225,37 @@ def run_new_repo_check(
                 """
                 return qe, qs
 
-        repo_conn = get_connection("repo")
-        repo_cur = repo_conn.cursor()
+        repo_results: List[Dict[str, Any]] = []
 
-        q_elapse, q_stat = _build_step5_queries(
-            engine=repo_engine,
-            schema=schema_name,
-            id_list_str=db_id_list_str,
-            part_date=partition_date,
-            log_time_str=logging_time_str,
-            id_filter=sql_id_filter,
-            id_order_expr=sql_id_order_expr,
-        )
+        for idx, repo_query in enumerate(normalized_repo_queries, start=1):
+            slot_id = str(repo_query.get("slot_id") or f"repo_{idx}").strip().lower()
+            step_no = 4 + idx
+            _progress(step_no - 1, total_steps, f"repo_query_{slot_id}", "running")
+            slot_result = _execute_repo_query_slot(
+                repo_query=repo_query,
+                default_db_id=int(db_id),
+                partition_date=partition_date,
+                logging_time_str=logging_time_str,
+                sql_id_filter=sql_id_filter,
+                sql_id_order_expr=sql_id_order_expr,
+                sql_id_replacements=expected_to_actual,
+            )
+            repo_results.append(slot_result)
+            _progress(step_no, total_steps, f"repo_query_{slot_id}", "fail" if slot_result.get("error") else "pass")
 
-        if repo_engine in ("postgresql", "postgres"):
-            result_data["repo_elapse"] = _query_rows_with_pg_apm_db_info_fallback(
-                repo_cur, q_elapse, schema_name, max_attempts=4, wait_seconds=8
-            )
-            result_data["repo_stat"] = _query_rows_with_pg_apm_db_info_fallback(
-                repo_cur, q_stat, schema_name, max_attempts=20, wait_seconds=30
-            )
-        else:
-            result_data["repo_elapse"] = _query_rows_with_retry(repo_cur, q_elapse, max_attempts=4, wait_seconds=8)
+        _repo_queries_to_legacy_fields(result_data, repo_results)
+        if repo_results and all(item.get("error") for item in repo_results):
+            overall_status = "error"
+            error_msg = "All selected repo queries failed"
             # ORA_SQL_STAT_10MIN은 MaxGauge가 10분 주기로 수집하므로 최대 ~10분 대기 (20회×30초)
-            result_data["repo_stat"] = _query_rows_with_retry(repo_cur, q_stat, max_attempts=20, wait_seconds=30)
-        result_data["repo_elapse_vsql"] = result_data["repo_elapse"]
-        result_data["repo_stat_vsql"] = result_data["repo_stat"]
-        _progress(5, 6, "repo_query_oracle_pg", "pass")
     except Exception as e:
         overall_status = "error"
         error_msg = f"Step 5 Repo DB Error: {str(e)}"
-        _progress(5, 6, "repo_query_oracle_pg", "fail")
-    finally:
-        try:
-            repo_cur.close()
-        except Exception:
-            pass
-        try:
-            release_connection("repo", repo_conn)
-        except Exception:
-            pass
+        failed_slot = repo_results[-1]["slot_id"] if repo_results else "repo_query"
+        failed_step = min(total_steps - 1, 4 + max(len(repo_results), 1))
+        _progress(failed_step, total_steps, f"repo_query_{failed_slot}", "fail")
+
+    pol_repo_config_id = None
 
     # Step 5b: POL Repo 조회 (pol_repo_config_id 제공 시, VSQL과 독립적으로 실행)
     if pol_repo_config_id and overall_status != "error":
@@ -887,7 +1267,11 @@ def run_new_repo_check(
             pol_cur = pol_conn.cursor()
             pol_engine = _infer_db_engine(pol_cfg, "postgresql")
 
-            pol_schema = _safe_pg_schema(pol_repo_schema_name or pol_cfg.get("schema_name"))
+            pol_schema = (
+                _safe_pg_schema(pol_repo_schema_name or pol_cfg.get("schema_name"))
+                if pol_engine in ("postgresql", "postgres")
+                else ""
+            )
             pol_id_list = _safe_db_id_list(pol_repo_db_id_list, int(db_id))
 
             pol_q_elapse, pol_q_stat = _build_step5_queries(
@@ -956,13 +1340,13 @@ def run_new_repo_check(
             scur.close()
             sys_conn.close()
             clean_msg = "SYS shared pool purge + drop procedures success"
-            _progress(6, 6, "target_cleanup_sys", "pass")
+            _progress(total_steps, total_steps, "target_cleanup_sys", "pass")
         except Exception as e:
             clean_msg = f"SYS cleanup failed: {e}"
-            _progress(6, 6, "target_cleanup_sys", "fail")
+            _progress(total_steps, total_steps, "target_cleanup_sys", "fail")
     else:
         clean_msg = "SYS password not provided; cleanup skipped"
-        _progress(6, 6, "target_cleanup_sys", "skip")
+        _progress(total_steps, total_steps, "target_cleanup_sys", "skip")
 
     result_data["cleanup_info"] = clean_msg
 
@@ -982,6 +1366,7 @@ def run_step5_repo_only(
     pol_repo_config_id: Optional[str] = None,
     pol_repo_schema_name: Optional[str] = None,
     pol_repo_db_id_list: Optional[str] = None,
+    repo_queries: Optional[List[Dict[str, Any]]] = None,
     target_config: Optional[Dict[str, Any]] = None,
     sys_password: Optional[str] = None,
     progress_callback=None,
@@ -994,26 +1379,21 @@ def run_step5_repo_only(
         if progress_callback:
             progress_callback(done, total, step_name, step_status)
 
-    def _safe_pg_schema(raw: Any) -> str:
-        s = str(raw or "").strip()
-        if not s:
-            return "public"
-        ok = (s[0].isalpha() or s[0] == "_") and all(ch.isalnum() or ch == "_" for ch in s)
-        return s if ok else "public"
-
-    def _safe_db_id_list(raw: Optional[str], default_db_id: int) -> str:
-        src = str(raw or "").strip()
-        if not src:
-            return str(int(default_db_id))
-        vals = [str(int(t.strip())) for t in src.split(",") if t.strip().isdigit()]
-        return ",".join(vals) if vals else str(int(default_db_id))
-
-    case_order = [
-        "case2_proc1", "case3_proc2", "case4_proc3", "case5_proc4", "case6_proc5",
+    case_order = CASE_ORDER
+    fixed_sql_ids = FIXED_SQL_IDS
+    normalized_repo_queries = [
+        _normalize_repo_query_item(item, "repo_a" if idx == 0 else "repo_b")
+        for idx, item in enumerate(repo_queries or [])
     ]
-    fixed_sql_ids = [
-        "fbf2t9pw12ynm", "ga6tfrmnrzwax", "af5w9c5uq9mf5", "9yv10yjy19dva", "9t1uh0g3vjnd7",
-    ]
+    if not normalized_repo_queries:
+        normalized_repo_queries = _build_legacy_repo_queries(
+            repo_db_id_list=repo_db_id_list,
+            repo_schema_name=repo_schema_name,
+            pol_repo_config_id=pol_repo_config_id,
+            pol_repo_schema_name=pol_repo_schema_name,
+            pol_repo_db_id_list=pol_repo_db_id_list,
+        )
+    total_steps = 2 + len(normalized_repo_queries)
 
     result_data: Dict[str, Any] = {
         "target_vsql": [],
@@ -1029,6 +1409,7 @@ def run_step5_repo_only(
         "logging_time": "", "partition_date": "",
         "repo_engine": "", "repo_schema": "",
         "case_exec_before": {}, "case_exec_after": {}, "case_exec_delta": {},
+        "repo_results": [],
     }
 
     overall_status = "pass"
@@ -1055,7 +1436,7 @@ def run_step5_repo_only(
     result_data["db_id_list"] = db_id_list_str
 
     # ── Target DB > V$SQL 조회 (target_config 제공 시) ──────────────
-    _progress(0, 3, "target_vsql_query", "running")
+    _progress(0, total_steps, "target_vsql_query", "running")
     if target_config:
         t_conn = None
         try:
@@ -1097,11 +1478,30 @@ def run_step5_repo_only(
                              ELSE 6 END, plan_hash_value
                 """)
             result_data["target_vsql"] = _fetch_dict_rows(t_cur)
+            actual_case_sql_ids: Dict[str, str] = {}
+            case_signatures: Dict[str, Dict[str, Any]] = {}
+            for row in result_data["target_vsql"]:
+                case_key = _extract_case_key_from_sql_text(row.get("sql_fulltext") or "")
+                if not case_key or case_key in actual_case_sql_ids:
+                    continue
+                sql_id = str(row.get("sql_id") or "").strip().lower()
+                if not sql_id:
+                    continue
+                actual_case_sql_ids[case_key] = sql_id
+                case_signatures[case_key] = {
+                    "sql_id": sql_id,
+                    "sql_hash": row.get("sql_hash"),
+                    "sql_addr": str(row.get("sql_addr") or "").upper() or None,
+                    "sql_plan_hash": row.get("plan_hash_value"),
+                }
+            result_data["case_actual_sql_ids"] = actual_case_sql_ids
+            result_data["case_sql_ids"] = actual_case_sql_ids or result_data["case_sql_ids"]
+            result_data["case_signatures"] = case_signatures
             t_cur.close()
-            _progress(1, 3, "target_vsql_query", "pass")
+            _progress(1, total_steps, "target_vsql_query", "pass")
         except Exception as e:
             result_data["target_vsql_error"] = str(e)
-            _progress(1, 3, "target_vsql_query", "fail")
+            _progress(1, total_steps, "target_vsql_query", "fail")
         finally:
             try:
                 if t_conn:
@@ -1109,7 +1509,99 @@ def run_step5_repo_only(
             except Exception:
                 pass
     else:
-        _progress(1, 3, "target_vsql_query", "skip")
+        _progress(1, total_steps, "target_vsql_query", "skip")
+
+    actual_case_ids = result_data.get("case_actual_sql_ids") or {}
+    expected_to_actual: Dict[str, str] = {}
+    effective_sql_ids: List[str] = []
+    step5_sql_id_per_case: Dict[str, str] = {}
+    for idx, case_key in enumerate(case_order):
+        expected_id = fixed_sql_ids[idx]
+        actual_id = str(actual_case_ids.get(case_key) or expected_id).strip().lower()
+        expected_to_actual[expected_id] = actual_id
+        effective_sql_ids.append(actual_id)
+        step5_sql_id_per_case[case_key] = actual_id
+    effective_sql_ids = _uniq(effective_sql_ids) or fixed_sql_ids
+    result_data["effective_sql_ids"] = effective_sql_ids
+    result_data["step5_sql_id_per_case"] = step5_sql_id_per_case
+
+    sql_id_filter = _sql_id_literal_list(effective_sql_ids)
+    sql_id_order_expr = _decode_sql_id_order_expr("a.sql_id", effective_sql_ids)
+
+    repo_results: List[Dict[str, Any]] = []
+    for idx, repo_query in enumerate(normalized_repo_queries, start=1):
+        slot_id = str(repo_query.get("slot_id") or f"repo_{idx}").strip().lower()
+        step_no = 1 + idx
+        _progress(step_no - 1, total_steps, f"repo_query_{slot_id}", "running")
+        slot_result = _execute_repo_query_slot(
+            repo_query=repo_query,
+            default_db_id=int(db_id),
+            partition_date=partition_date,
+            logging_time_str=logging_time_str,
+            sql_id_filter=sql_id_filter,
+            sql_id_order_expr=sql_id_order_expr,
+            sql_id_replacements=expected_to_actual,
+            pg_retry_wait_seconds=10,
+        )
+        repo_results.append(slot_result)
+        _progress(step_no, total_steps, f"repo_query_{slot_id}", "fail" if slot_result.get("error") else "pass")
+
+    _repo_queries_to_legacy_fields(result_data, repo_results)
+    if repo_results and all(item.get("error") for item in repo_results):
+        overall_status = "error"
+        error_msg = "All selected repo queries failed"
+
+    clean_msg = "SYS password not provided; cleanup skipped"
+    if sys_password and target_config:
+        try:
+            target_user = str(target_config.get("user") or "").strip()
+            dsn6 = oracledb.makedsn(
+                target_config["host"],
+                int(target_config.get("port") or 1521),
+                sid=target_config["sid"],
+            )
+            sys_conn = oracledb.connect(user="sys", password=sys_password, dsn=dsn6, mode=oracledb.SYSDBA)
+            scur = sys_conn.cursor()
+            step6_sql = _read_sql_template("step6.txt")
+            blocks = _split_oracle_blocks(step6_sql)
+            if blocks:
+                for block in blocks:
+                    exec_sql = block.replace("testuser_name := 'maxgauge';", f"testuser_name := '{target_user}';")
+                    exec_sql = exec_sql.replace(
+                        "test_db_user varchar2(20) := 'maxgauge';",
+                        f"test_db_user varchar2(20) := '{target_user}';",
+                    )
+                    if exec_sql.strip().endswith(";"):
+                        exec_sql = exec_sql.strip()[:-1]
+                    scur.execute(exec_sql)
+            else:
+                scur.execute(f"""
+                    DECLARE testuser_name varchar2(64) := '{target_user}';
+                    BEGIN
+                        EXECUTE IMMEDIATE 'DROP PROCEDURE ' || testuser_name || '.qs_sql_test_proc1';
+                        EXECUTE IMMEDIATE 'DROP PROCEDURE ' || testuser_name || '.qs_sql_test_proc2';
+                        EXECUTE IMMEDIATE 'DROP PROCEDURE ' || testuser_name || '.qs_sql_test_proc3';
+                        EXECUTE IMMEDIATE 'DROP PROCEDURE ' || testuser_name || '.qs_sql_test_proc4';
+                        EXECUTE IMMEDIATE 'DROP PROCEDURE ' || testuser_name || '.qs_sql_test_proc5';
+                    END;
+                """)
+            sys_conn.commit()
+            scur.close()
+            sys_conn.close()
+            clean_msg = "SYS shared pool purge + drop procedures success"
+            _progress(total_steps, total_steps, "target_cleanup_sys", "pass")
+        except Exception as e:
+            clean_msg = f"SYS cleanup failed: {e}"
+            _progress(total_steps, total_steps, "target_cleanup_sys", "fail")
+    else:
+        _progress(total_steps, total_steps, "target_cleanup_sys", "skip")
+    result_data["cleanup_info"] = clean_msg
+
+    return {
+        "overall_status": overall_status,
+        "error": error_msg,
+        "data": result_data,
+    }
 
     # ── VSQL Repo 조회 ──────────────────────────────────────────────
     _progress(1, 3, "repo_query_vsql", "running")
@@ -1120,7 +1612,11 @@ def run_step5_repo_only(
         repo_engine = _infer_db_engine(repo_cfg, "postgresql")
         result_data["repo_engine"] = repo_engine
         schema_override = str(repo_schema_name or "").strip()
-        schema_name = _safe_pg_schema(schema_override if schema_override else repo_cfg.get("schema_name"))
+        schema_name = (
+            _safe_pg_schema(schema_override if schema_override else repo_cfg.get("schema_name"))
+            if repo_engine in ("postgresql", "postgres")
+            else ""
+        )
         result_data["repo_schema"] = schema_name
 
         pg_case_order = (
@@ -1242,7 +1738,11 @@ def run_step5_repo_only(
             pol_conn, pol_cfg = connect_repo_by_config_id(pol_repo_config_id)
             pol_cur = pol_conn.cursor()
             pol_engine = _infer_db_engine(pol_cfg, "postgresql")
-            pol_schema = _safe_pg_schema(pol_repo_schema_name or pol_cfg.get("schema_name"))
+            pol_schema = (
+                _safe_pg_schema(pol_repo_schema_name or pol_cfg.get("schema_name"))
+                if pol_engine in ("postgresql", "postgres")
+                else ""
+            )
             pol_id_list = _safe_db_id_list(pol_repo_db_id_list, int(db_id))
             result_data["pol_repo_engine"] = pol_engine
             result_data["pol_repo_schema"] = pol_schema

@@ -24,3 +24,9 @@ ENV/
 # Secrets
 .env
 instantclient.zip
+
+# Generated artifacts
+.playwright-mcp/
+chart_exports/
+data_collection_reports/
+app/resource/*.jsonl

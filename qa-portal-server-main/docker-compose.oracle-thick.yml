@@ -1,0 +1,6 @@
+services:
+  web:
+    environment:
+      ORACLE_CLIENT_LIB_DIR: ${ORACLE_CLIENT_LIB_DIR:-/opt/oracle/instantclient}
+    volumes:
+      - ${ORACLE_CLIENT_HOST_PATH:?Set ORACLE_CLIENT_HOST_PATH to your Oracle Instant Client directory}:/opt/oracle/instantclient:ro

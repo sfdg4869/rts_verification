@@ -415,7 +415,7 @@ qa-portal-server-main/
 - **연관 파일**:
   - `app/services/db_config_service.py` (DB 목록 조회)
   - `app/shared_db.py` (설정 저장)
-  - `templates/db_selector.html` (웹 UI)
+  - `app/templates/db_selector.html` (웹 UI)
 
 #### `app/routes/statsec_gemma_auto.py`
 - **URL Prefix**: `/api/v1/rts/statsec`
@@ -730,7 +730,7 @@ MongoDB (설정 저장소)
 연결 대상:
 - app/services/db_config_service.py (DB 목록 조회)
 - app/shared_db.py (선택된 DB 저장)
-- templates/db_selector.html (웹 UI)
+- app/templates/db_selector.html (웹 UI)
 ```
 
 ### 6.3 데이터 흐름 예시
