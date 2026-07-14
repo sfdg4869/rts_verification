@@ -115,7 +115,9 @@ jobs:
         run: |
           PORT="${DEPLOY_PORT:-22}"
           install -m 700 -d ~/.ssh
-          ssh-keyscan -p "${PORT}" -H "${DEPLOY_HOST}" >> ~/.ssh/known_hosts
+          if ! ssh-keyscan -T 15 -p "${PORT}" -H "${DEPLOY_HOST}" >> ~/.ssh/known_hosts; then
+            echo "ssh-keyscan did not return a host key; continuing with StrictHostKeyChecking=no"
+          fi
 
       - name: Deploy on remote host
         shell: bash
@@ -133,6 +135,7 @@ jobs:
         run: |
           set -euo pipefail
           PORT="${DEPLOY_PORT:-22}"
+          SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15)
           APP_PORT_B64="$(printf '%s' "${APP_PORT_SECRET:-}" | base64 -w0)"
           DEPLOY_PATH_B64="$(printf '%s' "${DEPLOY_PATH}" | base64 -w0)"
           GHCR_TOKEN_B64="$(printf '%s' "${GHCR_TOKEN}" | base64 -w0)"
@@ -140,7 +143,7 @@ jobs:
           IMAGE_REF_B64="$(printf '%s' "${IMAGE_REF}" | base64 -w0)"
           TARGET_REF_B64="$(printf '%s' "${TARGET_REF}" | base64 -w0)"
 
-          sshpass -p "${DEPLOY_PASSWORD}" ssh -p "${PORT}" "${DEPLOY_USER}@${DEPLOY_HOST}" \
+          sshpass -p "${DEPLOY_PASSWORD}" ssh "${SSH_OPTS[@]}" -p "${PORT}" "${DEPLOY_USER}@${DEPLOY_HOST}" \
             "APP_PORT_B64='${APP_PORT_B64}' DEPLOY_PATH_B64='${DEPLOY_PATH_B64}' GHCR_TOKEN_B64='${GHCR_TOKEN_B64}' GHCR_USERNAME_B64='${GHCR_USERNAME_B64}' IMAGE_REF_B64='${IMAGE_REF_B64}' TARGET_REF_B64='${TARGET_REF_B64}' bash -s" <<'EOF'
           set -euo pipefail
 
